@@ -2,10 +2,10 @@
 
 ## Now
 
-- Supplier due diligence and evidence matrix.
-- Directory automation investigation.
-- Unit economics with assumptions separated from verified costs.
-- MVP architecture and data model.
+- Supplier due diligence and evidence matrix (initial public pass complete; quotes/contract checks pending).
+- Directory automation investigation (initial public pass complete; hands-on flow tests pending).
+- Unit economics with assumptions separated from verified costs (first-pass model complete).
+- MVP architecture and data model (draft complete; implementation boundary next).
 
 ## Next
 
