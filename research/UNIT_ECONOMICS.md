@@ -1,20 +1,23 @@
 # Unit Economics (hypotheses)
 
-Status: **ASSUMED / PENDING SUPPLIER QUOTES**
+Status: **FIRST-PASS HYPOTHESIS MODEL — 2026-08-26**
 
 Initial retail hypotheses: Launch $299, Authority $699, Authority+ $999.
 
 | Cost line | Launch | Authority | Authority+ | Status |
 |---|---:|---:|---:|---|
-| Wholesale PR | TBD | TBD | TBD | UNKNOWN |
-| Premium outlets | TBD | TBD | TBD | UNKNOWN |
-| Directory fulfillment | TBD | TBD | TBD | UNKNOWN |
-| Human QA | TBD | TBD | TBD | ASSUMED |
-| AI/API usage | TBD | TBD | TBD | ASSUMED |
-| Crawling/monitoring | TBD | TBD | TBD | ASSUMED |
-| Infrastructure | TBD | TBD | TBD | ASSUMED |
-| Payment fees | TBD | TBD | TBD | ASSUMED |
-| Refund/failure allowance | TBD | TBD | TBD | ASSUMED |
-| Support allowance | TBD | TBD | TBD | ASSUMED |
+| Wholesale PR | $22 | $30 | $45 | ASSUMED; anchored to public reseller pricing |
+| Premium outlets | $0 | $149 | $220 | ASSUMED; not a contracted quote |
+| Directory fulfillment | $40 | $80 | $120 | ASSUMED |
+| Human QA | $25 | $50 | $75 | ASSUMED |
+| AI/API usage | $10 | $20 | $30 | ASSUMED |
+| Crawling/monitoring | $5 | $20 | $40 | ASSUMED |
+| Infrastructure | $5 | $10 | $15 | ASSUMED |
+| Payment fees | $9 | $21 | $30 | ASSUMED at roughly 3% of retail |
+| Refund/failure allowance | $10 | $25 | $40 | ASSUMED |
+| Support allowance | $15 | $30 | $45 | ASSUMED |
+| **Estimated COGS** | **$141** | **$435** | **$620** | **ASSUMED** |
+| **Contribution dollars** | **$158** | **$264** | **$379** | **ASSUMED** |
+| **Contribution margin** | **52.8%** | **37.8%** | **38.0%** | **ASSUMED** |
 
-COGS, contribution margin, gross margin, break-even CAC, and volume-discount scenarios will be calculated after supplier and usage inputs are verified.
+At these assumptions, break-even CAC before fixed overhead is approximately the contribution dollars: $158 / $264 / $379. Biggest sensitivities are premium outlet pricing, directory labor, acceptance/refund rates, and whether “placement” is actually published and verifiable.

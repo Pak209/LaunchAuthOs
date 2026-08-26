@@ -17,3 +17,9 @@
 **Decision:** Use provider adapters behind a stable fulfillment contract.
 
 **Reason:** Supplier terms, pricing, coverage, and reliability are still unknown.
+
+## 2026-08-26 — Directory fulfillment starts assisted
+
+**Decision:** Treat BetaList as EDITORIAL and SourceForge as MANUAL/API-ASSISTED in the first directory adapter registry.
+
+**Reason:** Both require account-level actions and/or editorial or eligibility review. Automation must stop at the human boundary.
