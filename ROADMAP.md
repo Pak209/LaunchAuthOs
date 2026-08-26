@@ -9,10 +9,11 @@
 
 ## Next
 
-- Implement URL intake, source-linked Brand Profile, readiness assessment, and claim approval.
-- Add one provider adapter in a sandbox/test mode.
-- Add one assisted directory adapter.
-- Generate an evidence-backed report.
+- Expand homepage-only crawling into a bounded multi-page source collection.
+- Add persistence and authentication after selecting the production database/auth boundary.
+- Add one provider adapter in sandbox/test mode after contract and API validation.
+- Add one assisted directory adapter after account-level flow testing.
+- Generate a downloadable evidence-backed report.
 
 ## Later
 

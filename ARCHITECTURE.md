@@ -4,7 +4,7 @@
 
 Use a modular TypeScript web application with a relational database and a durable background-job boundary. Keep crawling, LLM extraction, fulfillment, directory submissions, and verification as separate workers behind application interfaces.
 
-Likely implementation: Next.js/TypeScript, Postgres-compatible storage, Stripe checkout, an LLM provider, and a queue/job runner. Final choices remain **ASSUMED** until repository and supplier research validate them.
+Implemented thin slice: Next.js/TypeScript with a Node runtime analysis endpoint. Postgres-compatible storage, Stripe checkout, an LLM provider, and a queue/job runner remain **ASSUMED** until the next production boundary is selected.
 
 ## Boundaries
 
@@ -15,3 +15,7 @@ Likely implementation: Next.js/TypeScript, Postgres-compatible storage, Stripe c
 - Reporting: customer-safe projections of observed facts.
 
 Provider adapters must expose a stable contract for quote, submit, status, cancel/refund request, and evidence retrieval. No customer-facing code should depend on a named supplier.
+
+## URL intake controls
+
+The crawler accepts only public HTTP/HTTPS pages, rejects credential-bearing and local/private targets, resolves DNS before fetching, refuses redirects, limits declared and retained HTML size, requires HTML content, and times out. Production hardening must also pin and revalidate the connected IP to close DNS rebinding and redirect edge cases at the transport layer.
