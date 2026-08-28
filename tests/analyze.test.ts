@@ -54,4 +54,22 @@ describe("company analysis", () => {
     await expect(analyzeCompany("https://acme.example", fetcher as typeof fetch, publicResolver as never))
       .rejects.toThrow(/too large/);
   });
+
+  it("collects a bounded set of same-origin source pages", async () => {
+    const fetcher = vi.fn(async (input: URL | RequestInfo) => {
+      const requested = input.toString();
+      const html = requested.includes("/about")
+        ? '<html><head><title>About Acme</title><meta name="description" content="Acme helps independent teams ship verified launches."></head></html>'
+        : '<html><head><title>Acme</title></head><body><a href="/about">About</a><a href="https://other.example/press">Offsite</a></body></html>';
+      return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+    });
+
+    const result = await analyzeCompany("https://acme.example", fetcher as typeof fetch, publicResolver as never);
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(result.sources).toHaveLength(2);
+    expect(result.profile.positioning).toContain("independent teams");
+    expect(result.profile.claims.some((claim) => claim.sourceUrl.endsWith("/about"))).toBe(true);
+    expect(result.sources?.some((source) => source.url.includes("other.example"))).toBe(false);
+  });
 });

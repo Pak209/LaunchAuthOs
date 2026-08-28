@@ -2,6 +2,7 @@
 
 ## Now
 
+- Authentication and persistence foundation implemented; Supabase project connection and live migration verification pending.
 - Supplier due diligence and evidence matrix (initial public pass complete; quotes/contract checks pending).
 - Directory automation investigation (initial public pass complete; hands-on flow tests pending).
 - Unit economics with assumptions separated from verified costs (first-pass model complete).
@@ -9,8 +10,8 @@
 
 ## Next
 
-- Expand homepage-only crawling into a bounded multi-page source collection.
-- Add persistence and authentication after selecting the production database/auth boundary.
+- Expand the bounded multi-page collector with structured founder, milestone, audience, proof, and competitor extraction.
+- Connect the production Supabase environment and verify tenant isolation with two test accounts.
 - Add one provider adapter in sandbox/test mode after contract and API validation.
 - Add one assisted directory adapter after account-level flow testing.
 - Generate a downloadable evidence-backed report.

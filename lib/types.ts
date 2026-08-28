@@ -26,5 +26,14 @@ export type AnalysisResult = {
     missingInformation: string[];
     strongestStoryAngle: string;
   };
+  sources?: Array<{ url: string; title: string; description: string }>;
   fetchedAt: string;
+};
+
+export type ProjectStatus = "evidence_review" | "approved" | "campaign" | "draft_ready";
+
+export type PersistedAnalysisResult = AnalysisResult & {
+  projectId?: number;
+  persistence?: "local" | "saved";
+  campaignStatus?: ProjectStatus;
 };

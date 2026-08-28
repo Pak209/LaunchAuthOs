@@ -1,13 +1,13 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight, Brain, Briefcase, Buildings, ChartLineUp, Check, CirclesFour,
   Compass, FileText, GlobeHemisphereWest, LinkSimple, ListChecks, MagnifyingGlass,
   Megaphone, Package, PaperPlaneTilt, RocketLaunch, ShieldCheck, Sparkle, SquaresFour,
-  Target, UserFocus,
+  SignOut, Target, UserFocus,
 } from "@phosphor-icons/react";
-import type { AnalysisResult, Claim } from "@/lib/types";
+import type { AnalysisResult, Claim, PersistedAnalysisResult } from "@/lib/types";
 import {
   AuthorityGraph, AuthorityScore, BrandIntelligenceCard, CampaignAsset, CampaignTimeline,
   DistributionProgress, EvidenceBadge, MetricCard, OpportunityCard, PackageCard, PlacementCard,
@@ -63,15 +63,15 @@ function AppShell({ activeView, setActiveView, children }: { activeView: View; s
   );
 }
 
-function TopBar({ activeView, isDemo }: { activeView: View; isDemo: boolean }) {
+function TopBar({ activeView, isDemo, persistence, canSignOut }: { activeView: View; isDemo: boolean; persistence?: "local" | "saved"; canSignOut: boolean }) {
   return (
     <header className="topbar">
       <div><h1>{activeView}</h1><p>{activeView === "Command Center" ? "Outcome-first overview. Understand momentum at a glance." : "Launch intelligence grounded in verified evidence."}</p></div>
       <div className="topbar-actions">
-        {isDemo ? <EvidenceBadge state="DEMO DATA" tone="warning" /> : <EvidenceBadge state="LIVE ANALYSIS" tone="positive" />}
+        {isDemo ? <EvidenceBadge state="DEMO DATA" tone="warning" /> : <EvidenceBadge state={persistence === "saved" ? "SAVED WORKSPACE" : "LOCAL ANALYSIS"} tone={persistence === "saved" ? "positive" : "neutral"} />}
         <button className="mode-button intelligence"><Brain size={15} /> Intelligence</button>
         <button className="mode-button authority"><ShieldCheck size={15} /> Authority</button>
-        <span className="profile-avatar"><UserFocus size={18} /></span>
+        {canSignOut ? <form action="/auth/signout" method="post"><button className="profile-avatar" title="Sign out" aria-label="Sign out"><SignOut size={17} /></button></form> : null}
       </div>
     </header>
   );
@@ -141,7 +141,7 @@ function CommandCenter({ result, isDemo, status, openCampaign }: { result: Analy
   );
 }
 
-function BrandIntelligence({ result, claims }: { result: AnalysisResult | null; claims: Claim[] }) {
+function BrandIntelligence({ result, claims, editClaim, saveEvidence }: { result: PersistedAnalysisResult | null; claims: Claim[]; editClaim: (id: string, text: string) => void; saveEvidence: () => void }) {
   if (!result) return <EmptyIntelligence title="No company intelligence yet" body="Run intelligence from the Command Center to build a source-backed brand model." />;
   return (
     <div className="brand-intelligence-layout">
@@ -152,11 +152,16 @@ function BrandIntelligence({ result, claims }: { result: AnalysisResult | null; 
       <BrandIntelligenceCard icon={Compass} label="Category & competitors" value="Requires founder confirmation and bounded competitor research." state="MISSING" />
       <section className="surface intelligence-claims">
         <div className="surface-heading"><div><span>Approved claims</span><small>Each claim retains its source and approval state</small></div><EvidenceBadge state={`${claims.filter((claim) => claim.approved).length}/${claims.length} APPROVED`} tone="neutral" /></div>
-        {claims.map((claim) => <div className="intelligence-claim" key={claim.id}><EvidenceBadge state={claim.state} tone={claim.state === "VERIFIED" ? "positive" : "warning"} /><p>{claim.text}</p><a href={claim.sourceUrl} target="_blank" rel="noreferrer">View source <ArrowRight size={12} /></a></div>)}
+        {claims.map((claim) => <div className="intelligence-claim" key={claim.id}><EvidenceBadge state={claim.state} tone={claim.state === "VERIFIED" ? "positive" : "warning"} /><textarea aria-label={`Edit claim: ${claim.text}`} value={claim.text} onChange={(event) => editClaim(claim.id, event.target.value)} /><a href={claim.sourceUrl} target="_blank" rel="noreferrer">View source <ArrowRight size={12} /></a></div>)}
+        <div className="evidence-save"><button className="secondary-button" onClick={saveEvidence}>{result.persistence === "saved" ? "Save evidence edits" : "Apply evidence edits locally"}</button><span>Edited source claims become assumed until reviewed and approved.</span></div>
       </section>
       <section className="surface missing-intelligence">
         <div className="surface-heading"><div><span>Missing intelligence</span><small>What the system still needs before paid distribution</small></div></div>
         {result.readiness.missingInformation.map((item) => <div className="missing-row" key={item}><span /><p>{item}</p><EvidenceBadge state="REQUIRED" tone="warning" /></div>)}
+      </section>
+      <section className="surface source-evidence">
+        <div className="surface-heading"><div><span>Observed source pages</span><small>Bounded, same-origin crawl evidence</small></div><EvidenceBadge state={`${result.sources?.length ?? 1} SOURCES`} tone="positive" /></div>
+        <div className="source-grid">{(result.sources ?? [{ url: result.profile.sourceUrl, title: result.profile.company, description: result.profile.positioning }]).map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.url}><GlobeHemisphereWest size={17} weight="duotone" /><span><strong>{source.title || new URL(source.url).pathname}</strong><small>{new URL(source.url).pathname || "/"}</small></span><ArrowRight size={12} /></a>)}</div>
       </section>
     </div>
   );
@@ -174,7 +179,7 @@ function CampaignStudio({ result, claims, toggleClaim, approvable, status, appro
       </section>
       <section className="surface claim-review">
         <div className="surface-heading"><div><span>Claim approval</span><small>No paid or generated campaign action can outrun approved evidence.</small></div><EvidenceBadge state={`${claims.filter((claim) => claim.approved).length}/${claims.length} REVIEWED`} tone={approvable ? "positive" : "warning"} /></div>
-        {claims.map((claim) => <label className="premium-claim" key={claim.id}><input type="checkbox" checked={claim.approved} onChange={() => toggleClaim(claim.id)} /><span className="check-control"><Check size={12} /></span><div><strong>{claim.text}</strong><a href={claim.sourceUrl} target="_blank" rel="noreferrer">{new URL(claim.sourceUrl).hostname} <ArrowRight size={11} /></a></div><EvidenceBadge state={claim.state} tone="positive" /></label>)}
+        {claims.map((claim) => <label className="premium-claim" key={claim.id}><input type="checkbox" checked={claim.approved} onChange={() => toggleClaim(claim.id)} /><span className="check-control"><Check size={12} /></span><div><strong>{claim.text}</strong><a href={claim.sourceUrl} target="_blank" rel="noreferrer">{new URL(claim.sourceUrl).hostname} <ArrowRight size={11} /></a></div><EvidenceBadge state={claim.state} tone={claim.state === "VERIFIED" ? "positive" : "warning"} /></label>)}
         <div className="review-actions"><button className="primary-button" disabled={!approvable || status === "approved" || generated} onClick={approve}>Approve claims <Check size={14} /></button><span>Approval unlocks campaign generation.</span></div>
       </section>
       <div className="asset-grid">
@@ -226,11 +231,32 @@ function EmptyIntelligence({ title, body }: { title: string; body: string }) {
 export default function Home() {
   const [activeView, setActiveView] = useState<View>("Command Center");
   const [url, setUrl] = useState("https://example.com");
-  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [result, setResult] = useState<PersistedAnalysisResult | null>(null);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "approved" | "campaign">("idle");
   const [error, setError] = useState("");
+  const [persistenceEnabled, setPersistenceEnabled] = useState(false);
   const approvable = useMemo(() => claims.length > 0 && claims.every((claim) => claim.approved), [claims]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/projects", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const payload = await response.json();
+        if (active) setPersistenceEnabled(Boolean(payload.configured));
+        return payload.project as PersistedAnalysisResult | null;
+      })
+      .then((project) => {
+        if (!active || !project) return;
+        setResult(project);
+        setClaims(project.profile.claims);
+        setUrl(project.profile.sourceUrl);
+        setStatus(project.campaignStatus === "draft_ready" ? "campaign" : project.campaignStatus === "approved" ? "approved" : "ready");
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setError(""); setStatus("loading");
@@ -246,13 +272,40 @@ export default function Home() {
 
   function toggleClaim(id: string) { setClaims((current) => current.map((claim) => claim.id === id ? { ...claim, approved: !claim.approved } : claim)); }
 
+  function editClaim(id: string, text: string) {
+    setClaims((current) => current.map((claim) => claim.id === id ? { ...claim, text, state: "ASSUMED", approved: false } : claim));
+    setStatus("ready");
+  }
+
+  async function saveCampaign(nextStatus: "evidence_review" | "approved" | "campaign") {
+    setError("");
+    if (!result?.projectId) {
+      setStatus(nextStatus === "evidence_review" ? "ready" : nextStatus);
+      return;
+    }
+    try {
+      const response = await fetch(`/api/projects/${result.projectId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ claims, status: nextStatus }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Unable to save the campaign.");
+      setStatus(nextStatus === "evidence_review" ? "ready" : nextStatus);
+      setResult((current) => current ? { ...current, campaignStatus: nextStatus === "campaign" ? "draft_ready" : nextStatus } : current);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to save the campaign.");
+    }
+  }
+
   return (
     <AppShell activeView={activeView} setActiveView={setActiveView}>
-      <TopBar activeView={activeView} isDemo={!result} />
+      <TopBar activeView={activeView} isDemo={!result} persistence={result?.persistence} canSignOut={persistenceEnabled} />
+      {error && activeView !== "Command Center" ? <p className="workspace-error" role="alert">{error}</p> : null}
       {activeView === "Command Center" ? <IntelligenceInput url={url} setUrl={setUrl} submit={submit} status={status} error={error} /> : null}
       {activeView === "Command Center" ? <CommandCenter result={result} isDemo={!result} status={status} openCampaign={() => setActiveView("Campaign Studio")} /> : null}
-      {activeView === "Brand Intelligence" ? <BrandIntelligence result={result} claims={claims} /> : null}
-      {activeView === "Campaign Studio" ? <CampaignStudio result={result} claims={claims} toggleClaim={toggleClaim} approvable={approvable} status={status} approve={() => setStatus("approved")} generate={() => setStatus("campaign")} /> : null}
+      {activeView === "Brand Intelligence" ? <BrandIntelligence result={result} claims={claims} editClaim={editClaim} saveEvidence={() => void saveCampaign("evidence_review")} /> : null}
+      {activeView === "Campaign Studio" ? <CampaignStudio result={result} claims={claims} toggleClaim={toggleClaim} approvable={approvable} status={status} approve={() => void saveCampaign("approved")} generate={() => void saveCampaign("campaign")} /> : null}
       {activeView === "Distribution Center" ? <DistributionCenter result={result} /> : null}
       {activeView === "Authority Graph" ? <AuthorityGraphScreen result={result} /> : null}
       {activeView === "Packages" ? <PackagesScreen /> : null}

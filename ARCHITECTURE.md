@@ -4,7 +4,7 @@
 
 Use a modular TypeScript web application with a relational database and a durable background-job boundary. Keep crawling, LLM extraction, fulfillment, directory submissions, and verification as separate workers behind application interfaces.
 
-Implemented thin slice: Next.js/TypeScript with a Node runtime analysis endpoint. Postgres-compatible storage, Stripe checkout, an LLM provider, and a queue/job runner remain **ASSUMED** until the next production boundary is selected.
+Implemented thin slice: Next.js/TypeScript with a Node runtime analysis endpoint. Supabase Auth/Postgres is now the selected production persistence boundary, with SSR cookie sessions, tenant-scoped RLS, and an explicit no-credentials local fallback. Stripe checkout, an LLM provider, and a queue/job runner remain **ASSUMED** until their production boundaries are selected.
 
 ## Boundaries
 
