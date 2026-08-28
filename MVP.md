@@ -25,9 +25,9 @@ Ship a testable workflow from URL intake to an evidence-backed report for a smal
 - **IMPLEMENTED:** Explicit VERIFIED and UNKNOWN claim states.
 - **IMPLEMENTED:** Claim-by-claim approval gate and local campaign-draft state.
 - **IMPLEMENTED:** Evidence table that distinguishes observed source, not submitted, and human review required.
-- **IMPLEMENTED, AWAITING ENVIRONMENT:** Supabase SSR authentication, session refresh, login/signup/signout, Postgres workspace/project schema, row-level tenant isolation, and persistent analysis/campaign APIs.
+- **IMPLEMENTED, AWAITING ENVIRONMENT:** Firebase Authentication, HTTP-only identity-token sessions, login/signup/signout, Firestore workspace/project documents, tenant security rules, and persistent analysis/campaign APIs.
 - **LOCAL FALLBACK:** The existing evidence workflow remains usable without credentials and explicitly identifies results as local rather than saved.
-- **BLOCKED EXTERNALLY:** Applying the production migration and verifying live persistence requires a selected Supabase project URL and publishable key.
+- **BLOCKED EXTERNALLY:** Enabling Firebase Authentication, creating Firestore, registering the Web app, and deploying security rules require completion in the Firebase project console.
 - **BLOCKED EXTERNALLY:** Paid distribution, directory submissions, billing, provider reporting, and placement verification require selected services and credentials.
 
 ## Explicitly deferred

@@ -2,7 +2,7 @@
 
 ## Now
 
-- Authentication and persistence foundation implemented; Supabase project connection and live migration verification pending.
+- Firebase authentication and persistence foundation implemented; console activation and live rules verification pending.
 - Supplier due diligence and evidence matrix (initial public pass complete; quotes/contract checks pending).
 - Directory automation investigation (initial public pass complete; hands-on flow tests pending).
 - Unit economics with assumptions separated from verified costs (first-pass model complete).
@@ -11,7 +11,7 @@
 ## Next
 
 - Expand the bounded multi-page collector with structured founder, milestone, audience, proof, and competitor extraction.
-- Connect the production Supabase environment and verify tenant isolation with two test accounts.
+- Connect the Firebase Web app and verify Firestore tenant isolation with two test accounts and the Rules emulator.
 - Add one provider adapter in sandbox/test mode after contract and API validation.
 - Add one assisted directory adapter after account-level flow testing.
 - Generate a downloadable evidence-backed report.

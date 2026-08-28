@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { updateProjectCampaign } from "@/lib/persistence";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
-import { createClient } from "@/lib/supabase/server";
+import { isFirebaseConfigured } from "@/lib/firebase/config";
+import { getAuthenticatedFirebaseContext } from "@/lib/firebase/server";
 
 const claimSchema = z.object({
   id: z.string().min(1).max(160),
@@ -19,19 +19,16 @@ const bodySchema = z.object({
 export const runtime = "nodejs";
 
 export async function PATCH(request: Request, context: { params: Promise<{ projectId: string }> }) {
-  if (!isSupabaseConfigured()) return NextResponse.json({ persistence: "local" });
+  if (!isFirebaseConfigured()) return NextResponse.json({ persistence: "local" });
 
   try {
     const { projectId: rawProjectId } = await context.params;
-    const projectId = Number(rawProjectId);
-    if (!Number.isSafeInteger(projectId) || projectId <= 0) {
+    if (!/^[a-f0-9]{24}$/.test(rawProjectId)) {
       return NextResponse.json({ error: "Invalid project identifier." }, { status: 400 });
     }
     const body = bodySchema.parse(await request.json());
-    const client = await createClient();
-    const { data: { user }, error } = await client.auth.getUser();
-    if (error || !user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    await updateProjectCampaign(client, user, projectId, body.claims, body.status);
+    const { db, user } = await getAuthenticatedFirebaseContext();
+    await updateProjectCampaign(db, user, rawProjectId, body.claims, body.status);
     return NextResponse.json({ persistence: "saved", status: body.status === "campaign" ? "draft_ready" : body.status });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to update the project.";

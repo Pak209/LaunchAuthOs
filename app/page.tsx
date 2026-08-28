@@ -242,6 +242,10 @@ export default function Home() {
     let active = true;
     fetch("/api/projects", { cache: "no-store" })
       .then(async (response) => {
+        if (response.status === 401) {
+          window.location.assign("/login");
+          return null;
+        }
         if (!response.ok) return null;
         const payload = await response.json();
         if (active) setPersistenceEnabled(Boolean(payload.configured));
@@ -263,6 +267,10 @@ export default function Home() {
     try {
       const response = await fetch("/api/analyze", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) });
       const payload = await response.json();
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
       if (!response.ok) throw new Error(payload.error ?? "Analysis failed.");
       setResult(payload); setClaims(payload.profile.claims); setStatus("ready");
     } catch (caught) {
@@ -290,6 +298,10 @@ export default function Home() {
         body: JSON.stringify({ claims, status: nextStatus }),
       });
       const payload = await response.json();
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
       if (!response.ok) throw new Error(payload.error ?? "Unable to save the campaign.");
       setStatus(nextStatus === "evidence_review" ? "ready" : nextStatus);
       setResult((current) => current ? { ...current, campaignStatus: nextStatus === "campaign" ? "draft_ready" : nextStatus } : current);

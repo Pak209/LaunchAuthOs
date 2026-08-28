@@ -4,7 +4,7 @@
 
 Use a modular TypeScript web application with a relational database and a durable background-job boundary. Keep crawling, LLM extraction, fulfillment, directory submissions, and verification as separate workers behind application interfaces.
 
-Implemented thin slice: Next.js/TypeScript with a Node runtime analysis endpoint. Supabase Auth/Postgres is now the selected production persistence boundary, with SSR cookie sessions, tenant-scoped RLS, and an explicit no-credentials local fallback. Stripe checkout, an LLM provider, and a queue/job runner remain **ASSUMED** until their production boundaries are selected.
+Implemented thin slice: Next.js/TypeScript with a Node runtime analysis endpoint. Firebase Authentication and Cloud Firestore are now the selected production identity/persistence boundary. The server continues client-created Firebase identity tokens through short-lived HTTP-only cookies and `FirebaseServerApp`, so Firestore operations execute in user context and remain subject to workspace security rules. An explicit no-credentials local fallback remains available. Stripe checkout, an LLM provider, and a queue/job runner remain **ASSUMED** until their production boundaries are selected.
 
 ## Boundaries
 

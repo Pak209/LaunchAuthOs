@@ -33,7 +33,7 @@ export type AnalysisResult = {
 export type ProjectStatus = "evidence_review" | "approved" | "campaign" | "draft_ready";
 
 export type PersistedAnalysisResult = AnalysisResult & {
-  projectId?: number;
+  projectId?: string;
   persistence?: "local" | "saved";
   campaignStatus?: ProjectStatus;
 };

@@ -12,14 +12,15 @@ Start with:
 
 ## Production foundation setup
 
-The app keeps working in explicit local mode when Supabase is not configured. To enable authenticated, persistent workspaces:
+The app keeps working in explicit local mode when Firebase is not configured. To enable authenticated, persistent workspaces:
 
-1. Create a Supabase project.
-2. Copy `.env.example` to `.env.local` and add the project URL and publishable key.
-3. Apply `supabase/migrations/202608280001_initial_workspace_auth.sql` through the Supabase SQL editor or CLI.
-4. Add `http://127.0.0.1:4173/auth/callback` as an allowed Auth redirect URL during local development.
+1. Create the Firebase project and register a Web app.
+2. Copy `.env.example` to `.env.local` and add the public Firebase Web configuration.
+3. Enable Email/Password in Firebase Authentication.
+4. Create the default Cloud Firestore database in production mode.
+5. Deploy `firestore.rules` and `firestore.indexes.json` with the Firebase CLI.
 
-Never add a service-role or secret key to browser-visible environment variables. All tenant data is protected with Postgres row-level security.
+Firebase Web configuration is public application metadata, not an administrator credential. Never add service-account JSON or private keys to browser-visible environment variables. Workspace data is protected with Firestore Security Rules and authenticated user context.
 - [ARCHITECTURE.md](ARCHITECTURE.md)
 - [ROADMAP.md](ROADMAP.md)
 - [research/SUPPLIER_MATRIX.md](research/SUPPLIER_MATRIX.md)

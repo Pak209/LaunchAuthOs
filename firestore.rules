@@ -1,0 +1,66 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function membershipPath(workspaceId) {
+      return /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid);
+    }
+
+    function isMember(workspaceId) {
+      return signedIn() && exists(membershipPath(workspaceId));
+    }
+
+    function memberRole(workspaceId) {
+      return get(membershipPath(workspaceId)).data.role;
+    }
+
+    function canEdit(workspaceId) {
+      return isMember(workspaceId) && memberRole(workspaceId) in ['owner', 'admin', 'member'];
+    }
+
+    function canAdmin(workspaceId) {
+      return isMember(workspaceId) && memberRole(workspaceId) in ['owner', 'admin'];
+    }
+
+    match /workspaces/{workspaceId} {
+      allow read: if isMember(workspaceId);
+      allow create: if signedIn()
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update: if canAdmin(workspaceId)
+        && request.resource.data.createdBy == resource.data.createdBy;
+      allow delete: if isMember(workspaceId) && memberRole(workspaceId) == 'owner';
+
+      match /members/{memberId} {
+        allow read: if isMember(workspaceId);
+        allow create: if signedIn()
+          && memberId == request.auth.uid
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.role == 'owner'
+          && getAfter(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      match /projects/{projectId} {
+        allow read: if isMember(workspaceId);
+        allow create: if canEdit(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.lifecycleStatus in ['evidence_review', 'approved', 'draft_ready'];
+        allow update: if canEdit(workspaceId)
+          && request.resource.data.workspaceId == resource.data.workspaceId
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.lifecycleStatus in ['evidence_review', 'approved', 'draft_ready'];
+        allow delete: if canAdmin(workspaceId);
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

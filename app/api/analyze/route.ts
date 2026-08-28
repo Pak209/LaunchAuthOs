@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { analyzeCompany } from "@/lib/analyze";
 import { persistAnalysis } from "@/lib/persistence";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
-import { createClient } from "@/lib/supabase/server";
+import { isFirebaseConfigured } from "@/lib/firebase/config";
+import { getAuthenticatedFirebaseContext } from "@/lib/firebase/server";
 
 export const runtime = "nodejs";
 
@@ -13,15 +13,13 @@ export async function POST(request: Request) {
   try {
     const body = requestSchema.parse(await request.json());
     const result = await analyzeCompany(body.url);
-    if (!isSupabaseConfigured()) {
+    if (!isFirebaseConfigured()) {
       return NextResponse.json({ ...result, persistence: "local" });
     }
 
     try {
-      const client = await createClient();
-      const { data: { user }, error } = await client.auth.getUser();
-      if (error || !user) return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-      return NextResponse.json(await persistAnalysis(client, user, result));
+      const { db, user } = await getAuthenticatedFirebaseContext();
+      return NextResponse.json(await persistAnalysis(db, user, result));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to save this analysis.";
       return NextResponse.json({ error: message }, { status: 503 });
