@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  ArrowRight, Brain, Briefcase, Buildings, ChartLineUp, Check, CirclesFour,
+  ArrowRight, Brain, Briefcase, Buildings, ChartLineUp, Check, CheckCircle, CirclesFour,
   Compass, FileText, GlobeHemisphereWest, LinkSimple, ListChecks, MagnifyingGlass,
   Megaphone, Package, PaperPlaneTilt, RocketLaunch, ShieldCheck, Sparkle, SquaresFour,
   SignOut, Target, UserFocus,
@@ -25,21 +25,18 @@ const navItems: Array<{ label: View; icon: typeof SquaresFour }> = [
   { label: "Packages", icon: Package },
 ];
 
-const demoScore = 72;
-const demoMetrics = { placements: 486, directories: 67, backlinks: 138, ai: "8 / 10", search: 68 };
-
 function ProductMark() {
   return <span className="product-mark"><CirclesFour weight="duotone" size={23} /></span>;
 }
 
-function AppShell({ activeView, setActiveView, children }: { activeView: View; setActiveView: (view: View) => void; children: React.ReactNode }) {
+function AppShell({ activeView, setActiveView, hasIntelligence, children }: { activeView: View; setActiveView: (view: View) => void; hasIntelligence: boolean; children: React.ReactNode }) {
   return (
     <main className="signal-shell">
       <aside className="signal-sidebar">
         <div className="signal-brand"><ProductMark /><div><strong>Launch Auth</strong><span>AI launch & authority engine</span></div></div>
         <nav aria-label="Product navigation">
           {navItems.map(({ label, icon: Icon }) => (
-            <button key={label} className={activeView === label ? "active" : ""} onClick={() => setActiveView(label)}>
+            <button key={label} className={activeView === label ? "active" : ""} onClick={() => setActiveView(label)} aria-label={label} title={label}>
               <Icon size={18} weight={activeView === label ? "duotone" : "regular"} />
               <span>{label}</span>
               {activeView !== label ? <ArrowRight size={12} /> : null}
@@ -49,13 +46,13 @@ function AppShell({ activeView, setActiveView, children }: { activeView: View; s
         <div className="side-spacer" />
         <div className="client-card">
           <span className="client-monogram">LA</span>
-          <div><strong>Launch workspace</strong><small>Evidence-first V0.1</small></div>
-          <EvidenceBadge state="ACTIVE" tone="positive" />
+          <div><strong>{hasIntelligence ? "Launch workspace" : "New workspace"}</strong><small>{hasIntelligence ? "Evidence-first V0.1" : "Setup not started"}</small></div>
+          <EvidenceBadge state={hasIntelligence ? "ACTIVE" : "SETUP"} tone={hasIntelligence ? "positive" : "neutral"} />
         </div>
         <div className="advisor-card">
           <Sparkle size={17} weight="duotone" />
           <strong>Your Launch Advisor</strong>
-          <p>Authority opportunities will appear as your evidence grows.</p>
+          <p>{hasIntelligence ? "Authority opportunities will appear as your evidence grows." : "Start with your public company website. Your workspace will grow from verified evidence."}</p>
         </div>
       </aside>
       <section className="signal-main">{children}</section>
@@ -63,12 +60,12 @@ function AppShell({ activeView, setActiveView, children }: { activeView: View; s
   );
 }
 
-function TopBar({ activeView, isDemo, persistence, canSignOut }: { activeView: View; isDemo: boolean; persistence?: "local" | "saved"; canSignOut: boolean }) {
+function TopBar({ activeView, hasIntelligence, persistence, canSignOut }: { activeView: View; hasIntelligence: boolean; persistence?: "local" | "saved"; canSignOut: boolean }) {
   return (
     <header className="topbar">
       <div><h1>{activeView}</h1><p>{activeView === "Command Center" ? "Outcome-first overview. Understand momentum at a glance." : "Launch intelligence grounded in verified evidence."}</p></div>
       <div className="topbar-actions">
-        {isDemo ? <EvidenceBadge state="DEMO DATA" tone="warning" /> : <EvidenceBadge state={persistence === "saved" ? "SAVED WORKSPACE" : "LOCAL ANALYSIS"} tone={persistence === "saved" ? "positive" : "neutral"} />}
+        <EvidenceBadge state={hasIntelligence ? (persistence === "saved" ? "SAVED WORKSPACE" : "LOCAL ANALYSIS") : "GETTING STARTED"} tone={hasIntelligence && persistence === "saved" ? "positive" : "neutral"} />
         <button className="mode-button intelligence"><Brain size={15} /> Intelligence</button>
         <button className="mode-button authority"><ShieldCheck size={15} /> Authority</button>
         {canSignOut ? <form action="/auth/signout" method="post"><button className="profile-avatar" title="Sign out" aria-label="Sign out"><SignOut size={17} /></button></form> : null}
@@ -80,11 +77,11 @@ function TopBar({ activeView, isDemo, persistence, canSignOut }: { activeView: V
 function IntelligenceInput({ url, setUrl, submit, status, error }: { url: string; setUrl: (url: string) => void; submit: (event: FormEvent) => void; status: string; error: string }) {
   return (
     <section className="intelligence-input">
-      <div className="input-copy"><Target size={19} weight="duotone" /><div><strong>Analyze company intelligence</strong><span>Replace demo metrics with source-backed findings from a public URL.</span></div></div>
+      <div className="input-copy"><Target size={19} weight="duotone" /><div><strong>Analyze company intelligence</strong><span>Start with a public URL. Every result must retain its source.</span></div></div>
       <form onSubmit={submit}>
         <label className="sr-only" htmlFor="company-url">Company URL</label>
         <MagnifyingGlass size={17} />
-        <input id="company-url" type="url" value={url} onChange={(event) => setUrl(event.target.value)} required />
+        <input id="company-url" type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://yourcompany.com" autoComplete="url" spellCheck={false} required />
         <button type="submit" disabled={status === "loading"}>{status === "loading" ? "Analyzing…" : "Run intelligence"}<ArrowRight size={14} /></button>
       </form>
       {error ? <p className="input-error" role="alert">{error}</p> : null}
@@ -92,13 +89,72 @@ function IntelligenceInput({ url, setUrl, submit, status, error }: { url: string
   );
 }
 
-function CommandCenter({ result, isDemo, status, openCampaign }: { result: AnalysisResult | null; isDemo: boolean; status: string; openCampaign: () => void }) {
-  const score = result?.readiness.score ?? demoScore;
-  const metrics = isDemo ? demoMetrics : { placements: 0, directories: 0, backlinks: 0, ai: "Unknown", search: 0 };
-  const opportunity = result?.readiness.strongestStoryAngle ?? "Fitness progression meets AI-powered gaming.";
+const setupSteps = [
+  { title: "Analyze your company", body: "Add your public website. Launch Auth reads a bounded set of pages and preserves every source it uses.", state: "Start here" },
+  { title: "Review your intelligence", body: "Confirm the company profile, edit assumptions, and inspect the source behind every claim.", state: "After analysis" },
+  { title: "Approve a campaign", body: "Select defensible claims, approve them, and generate a campaign draft grounded in that evidence.", state: "After review" },
+  { title: "Track real outcomes", body: "Distribution and authority views stay empty until submissions, placements, or indexing are actually observed.", state: "After launch" },
+] as const;
+
+function SetupGuide() {
+  function focusCompanyUrl() {
+    document.getElementById("company-url")?.focus();
+  }
+
+  return (
+    <div className="setup-guide">
+      <section className="surface setup-hero" aria-labelledby="setup-title">
+        <div>
+          <span className="setup-kicker">Your workspace starts empty</span>
+          <h2 id="setup-title">Build your first source-backed launch.</h2>
+          <p>Launch Auth will never fill a new account with pretend reach, placements, or authority. Add your website to create the first real intelligence record.</p>
+          <button className="primary-button" onClick={focusCompanyUrl}>Start with your website <ArrowRight size={14} /></button>
+        </div>
+        <aside className="setup-promise">
+          <ShieldCheck size={27} weight="duotone" />
+          <div><strong>Evidence before metrics</strong><span>Numbers appear only when they are calculated from your analysis or observed from real outcomes.</span></div>
+        </aside>
+      </section>
+
+      <section className="surface setup-path">
+        <div className="surface-heading"><div><span>How Launch Auth works</span><small>Follow this path from company URL to measurable authority</small></div><EvidenceBadge state="4 STEPS" tone="accent" /></div>
+        <ol>
+          {setupSteps.map((step, index) => (
+            <li className={index === 0 ? "active" : ""} key={step.title}>
+              <span className="setup-step-number">{index + 1}</span>
+              <div><strong>{step.title}</strong><p>{step.body}</p></div>
+              <small>{step.state}</small>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section className="setup-learn" aria-labelledby="workspace-guide-title">
+        <div className="setup-learn-heading"><div><h2 id="workspace-guide-title">Know where everything lives</h2><p>Each area has one job. You can explore them now; they will remain honest empty states until the required evidence exists.</p></div></div>
+        <div className="setup-learn-grid">
+          <article className="surface"><Briefcase size={22} weight="duotone" /><strong>Brand Intelligence</strong><p>Your sourced company profile, editable claims, audience gaps, and the pages used as evidence.</p></article>
+          <article className="surface"><Megaphone size={22} weight="duotone" /><strong>Campaign Studio</strong><p>Where you approve evidence and turn verified facts into launch narratives and campaign assets.</p></article>
+          <article className="surface"><GlobeHemisphereWest size={22} weight="duotone" /><strong>Distribution Center</strong><p>A truthful ledger of submissions and outcomes. Nothing is marked published until it is observed.</p></article>
+          <article className="surface"><CirclesFour size={22} weight="duotone" /><strong>Authority Graph</strong><p>Your growing footprint across sources, placements, directories, backlinks, search, and AI visibility.</p></article>
+        </div>
+      </section>
+
+      <section className="surface setup-ready">
+        <CheckCircle size={22} weight="duotone" />
+        <div><strong>Before you begin</strong><p>Use a public company homepage with a clear product description. About, product, pricing, and contact pages help the analysis find stronger evidence.</p></div>
+      </section>
+    </div>
+  );
+}
+
+function CommandCenter({ result, status, openCampaign }: { result: AnalysisResult | null; status: string; openCampaign: () => void }) {
+  if (!result) return <SetupGuide />;
+  const score = result.readiness.score;
+  const metrics = { placements: 0, directories: 0, backlinks: 0, ai: "Not measured", search: "Not measured" };
+  const opportunity = result.readiness.strongestStoryAngle;
   const timeline: TimelineStep[] = [
-    { label: "Discover", meta: result ? "Complete" : "Demo", state: result ? "complete" : "demo" },
-    { label: "Strategy", meta: result ? "Ready" : "Demo", state: result ? "complete" : "demo" },
+    { label: "Discover", meta: "Complete", state: "complete" },
+    { label: "Strategy", meta: "Ready", state: "complete" },
     { label: "Review", meta: status === "approved" || status === "campaign" ? "Approved" : "Pending", state: status === "approved" || status === "campaign" ? "complete" : "pending" },
     { label: "Campaign", meta: status === "campaign" ? "Draft ready" : "Waiting", state: status === "campaign" ? "active" : "pending" },
     { label: "Distribution", meta: "Not connected", state: "locked" },
@@ -107,35 +163,31 @@ function CommandCenter({ result, isDemo, status, openCampaign }: { result: Analy
 
   return (
     <div className="command-grid">
-      <AuthorityScore score={score} delta={isDemo ? "+18 demo" : "Source-backed readiness proxy"} />
+      <AuthorityScore score={score} delta="Source-backed readiness proxy" />
       <div className="metric-ribbon">
-        <MetricCard icon={Buildings} label="Media placements" value={metrics.placements} change={isDemo ? "+157 demo" : "No distribution"} />
-        <MetricCard icon={Briefcase} label="Directories" value={metrics.directories} change={isDemo ? "+23 demo" : "Not submitted"} />
-        <MetricCard icon={LinkSimple} label="Backlinks" value={metrics.backlinks} change={isDemo ? "+46 demo" : "Not observed"} />
-        <MetricCard icon={Brain} label="AI visibility" value={metrics.ai} change={isDemo ? "+2 demo" : "Not measured"} />
-        <MetricCard icon={MagnifyingGlass} label="Search presence" value={metrics.search} change={isDemo ? "+14 demo" : "Not measured"} />
+        <MetricCard icon={Buildings} label="Media placements" value={metrics.placements} change="No distribution" />
+        <MetricCard icon={Briefcase} label="Directories" value={metrics.directories} change="Not submitted" />
+        <MetricCard icon={LinkSimple} label="Backlinks" value={metrics.backlinks} change="Not observed" />
+        <MetricCard icon={Brain} label="AI visibility" value={metrics.ai} change="Not measured" />
+        <MetricCard icon={MagnifyingGlass} label="Search presence" value={metrics.search} change="Not measured" />
       </div>
-      <CampaignTimeline steps={timeline} campaignId={isDemo ? "DEMO-2048" : "LOCAL-0001"} />
-      <OpportunityCard score={result ? Math.min(100, result.readiness.score + 18) : 86} narrative={opportunity} evidence={result ? result.readiness.score : 84} onBuild={openCampaign} demo={isDemo} />
-      <AuthorityGraph score={score} demo={isDemo} />
+      <CampaignTimeline steps={timeline} campaignId="CURRENT" />
+      <OpportunityCard score={Math.min(100, result.readiness.score + 18)} narrative={opportunity} evidence={result.readiness.score} onBuild={openCampaign} demo={false} />
+      <AuthorityGraph score={score} demo={false} />
       <section className="surface recent-wins">
-        <div className="surface-heading"><div><span>Observed evidence</span><small>Truthful status, source by source</small></div><EvidenceBadge state={result ? "1 OBSERVED" : "DEMO"} tone={result ? "positive" : "warning"} /></div>
-        {result ? <PlacementCard title={result.profile.company} subtitle="Homepage source" state="PUBLISHED SOURCE" href={result.profile.sourceUrl} /> : <>
-          <PlacementCard title="Tech publication feature" subtitle="Illustrative placement" state="DEMO" />
-          <PlacementCard title="Directory approval" subtitle="Illustrative directory" state="DEMO" />
-          <PlacementCard title="Search indexing" subtitle="Illustrative indexing state" state="DEMO" />
-        </>}
+        <div className="surface-heading"><div><span>Observed evidence</span><small>Truthful status, source by source</small></div><EvidenceBadge state="1 OBSERVED" tone="positive" /></div>
+        <PlacementCard title={result.profile.company} subtitle="Homepage source" state="PUBLISHED SOURCE" href={result.profile.sourceUrl} />
       </section>
-      <DistributionProgress published={isDemo ? 427 : 0} processing={isDemo ? 53 : 0} submitted={isDemo ? 12 : 0} pending={isDemo ? 8 : 0} demo={isDemo} />
+      <DistributionProgress published={0} processing={0} submitted={0} pending={0} demo={false} />
       <section className="surface next-action">
         <Sparkle size={19} weight="fill" />
-        <div><span>Recommended next action</span><p>{result ? "Review every extracted claim, then build a conservative campaign draft." : "Analyze your company to replace this demo with evidence-backed recommendations."}</p></div>
+        <div><span>Recommended next action</span><p>Review every extracted claim, then build a conservative campaign draft.</p></div>
         <button className="secondary-button" onClick={openCampaign}>Open Campaign Studio</button>
       </section>
       <div className="pulse-metrics">
         <MetricCard icon={RocketLaunch} label="Launch readiness" value={`${score} / 100`} change={score >= 70 ? "Promising" : "Needs evidence"} compact />
-        <MetricCard icon={ShieldCheck} label="Evidence integrity" value={result ? "Verified" : "Demo"} change={result ? "Source preserved" : "Analyze to verify"} compact />
-        <MetricCard icon={ChartLineUp} label="Momentum" value={result ? "Baseline" : "Demo"} change={result ? "Ready to track" : "Illustrative"} compact />
+        <MetricCard icon={ShieldCheck} label="Evidence integrity" value="Verified" change="Source preserved" compact />
+        <MetricCard icon={ChartLineUp} label="Momentum" value="Baseline" change="Ready to track" compact />
       </div>
     </div>
   );
@@ -191,17 +243,18 @@ function CampaignStudio({ result, claims, toggleClaim, approvable, status, appro
 }
 
 function DistributionCenter({ result }: { result: AnalysisResult | null }) {
+  if (!result) return <EmptyIntelligence title="Distribution has not started" body="Analyze your company and approve a campaign first. Submission counts and placement statuses will appear only after real fulfillment begins." />;
   return (
     <div className="distribution-center">
       <section className="surface distribution-hero">
-        <div><EvidenceBadge state="FULFILLMENT STATUS" tone="accent" /><h2>{result ? "0 / 0 outlets published" : "Distribution not started"}</h2><p>Statuses stay truthful: submitted, editorial review, published, indexed, pending, or failed.</p></div>
+        <div><EvidenceBadge state="FULFILLMENT STATUS" tone="accent" /><h2>0 / 0 outlets published</h2><p>Statuses stay truthful: submitted, editorial review, published, indexed, pending, or failed.</p></div>
         <EvidenceBadge state="PROVIDER NOT CONNECTED" tone="warning" />
       </section>
       <DistributionProgress published={0} processing={0} submitted={0} pending={0} demo={false} large />
       <section className="surface distribution-timeline">
         <div className="surface-heading"><div><span>Campaign timeline</span><small>Customer-facing fulfillment without supplier exposure</small></div></div>
         {[
-          ["Strategy approved", result ? "READY" : "WAITING", "neutral"],
+          ["Strategy approved", "READY", "neutral"],
           ["Press release approved", "WAITING", "warning"],
           ["Distribution processing", "NOT STARTED", "neutral"],
           ["Directory submissions", "NOT STARTED", "neutral"],
@@ -210,14 +263,15 @@ function DistributionCenter({ result }: { result: AnalysisResult | null }) {
       </section>
       <section className="surface placement-ledger">
         <div className="surface-heading"><div><span>Placement evidence ledger</span><small>Only observed outcomes appear here</small></div></div>
-        {result ? <PlacementCard title={result.profile.company} subtitle="Observed company homepage" state="PUBLISHED SOURCE" href={result.profile.sourceUrl} /> : <div className="ledger-empty">No placement evidence has been observed.</div>}
+        <PlacementCard title={result.profile.company} subtitle="Observed company homepage" state="PUBLISHED SOURCE" href={result.profile.sourceUrl} />
       </section>
     </div>
   );
 }
 
 function AuthorityGraphScreen({ result }: { result: AnalysisResult | null }) {
-  return <div className="graph-screen"><AuthorityGraph score={result?.readiness.score ?? demoScore} demo={!result} expanded /><div className="graph-legend">{["Media", "Search", "Directories", "Backlinks", "AI", "Social"].map((item) => <span key={item}><i />{item}<small>{result ? "0 verified nodes" : "Demo cluster"}</small></span>)}</div><section className="surface graph-explanation"><Sparkle size={20} weight="duotone" /><div><h2>Your authority footprint</h2><p>The graph grows only as verified placements, directory approvals, indexed sources, backlinks, and detected authority signals are recorded.</p></div></section></div>;
+  if (!result) return <EmptyIntelligence title="Your authority graph is empty" body="Analyze your company first. The graph will grow only from verified sources and observed authority signals." />;
+  return <div className="graph-screen"><AuthorityGraph score={result.readiness.score} demo={false} expanded /><div className="graph-legend">{["Media", "Search", "Directories", "Backlinks", "AI", "Social"].map((item) => <span key={item}><i />{item}<small>0 verified nodes</small></span>)}</div><section className="surface graph-explanation"><Sparkle size={20} weight="duotone" /><div><h2>Your authority footprint</h2><p>The graph grows only as verified placements, directory approvals, indexed sources, backlinks, and detected authority signals are recorded.</p></div></section></div>;
 }
 
 function PackagesScreen() {
@@ -230,7 +284,7 @@ function EmptyIntelligence({ title, body }: { title: string; body: string }) {
 
 export default function Home() {
   const [activeView, setActiveView] = useState<View>("Command Center");
-  const [url, setUrl] = useState("https://example.com");
+  const [url, setUrl] = useState("");
   const [result, setResult] = useState<PersistedAnalysisResult | null>(null);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "approved" | "campaign">("idle");
@@ -311,11 +365,11 @@ export default function Home() {
   }
 
   return (
-    <AppShell activeView={activeView} setActiveView={setActiveView}>
-      <TopBar activeView={activeView} isDemo={!result} persistence={result?.persistence} canSignOut={persistenceEnabled} />
+    <AppShell activeView={activeView} setActiveView={setActiveView} hasIntelligence={Boolean(result)}>
+      <TopBar activeView={activeView} hasIntelligence={Boolean(result)} persistence={result?.persistence} canSignOut={persistenceEnabled} />
       {error && activeView !== "Command Center" ? <p className="workspace-error" role="alert">{error}</p> : null}
       {activeView === "Command Center" ? <IntelligenceInput url={url} setUrl={setUrl} submit={submit} status={status} error={error} /> : null}
-      {activeView === "Command Center" ? <CommandCenter result={result} isDemo={!result} status={status} openCampaign={() => setActiveView("Campaign Studio")} /> : null}
+      {activeView === "Command Center" ? <CommandCenter result={result} status={status} openCampaign={() => setActiveView("Campaign Studio")} /> : null}
       {activeView === "Brand Intelligence" ? <BrandIntelligence result={result} claims={claims} editClaim={editClaim} saveEvidence={() => void saveCampaign("evidence_review")} /> : null}
       {activeView === "Campaign Studio" ? <CampaignStudio result={result} claims={claims} toggleClaim={toggleClaim} approvable={approvable} status={status} approve={() => void saveCampaign("approved")} generate={() => void saveCampaign("campaign")} /> : null}
       {activeView === "Distribution Center" ? <DistributionCenter result={result} /> : null}
