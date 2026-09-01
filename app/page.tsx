@@ -3,18 +3,18 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight, Brain, Briefcase, Buildings, ChartLineUp, Check, CheckCircle, CirclesFour,
-  Compass, FileText, GlobeHemisphereWest, LinkSimple, ListChecks, MagnifyingGlass,
+  FileText, GlobeHemisphereWest, LinkSimple, ListChecks, MagnifyingGlass,
   Megaphone, Package, PaperPlaneTilt, RocketLaunch, ShieldCheck, Sparkle, SquaresFour,
-  SignOut, Target, UserFocus,
+  SignOut, Target,
 } from "@phosphor-icons/react";
-import type { AnalysisResult, Claim, PersistedAnalysisResult } from "@/lib/types";
+import type { AnalysisResult, Claim, FindingKind, FulfillmentState, PersistedAnalysisResult, ProjectSummary } from "@/lib/types";
 import {
-  AuthorityGraph, AuthorityScore, BrandIntelligenceCard, CampaignAsset, CampaignTimeline,
+  AuthorityGraph, AuthorityScore, CampaignAsset, CampaignTimeline,
   DistributionProgress, EvidenceBadge, MetricCard, OpportunityCard, PackageCard, PlacementCard,
   type TimelineStep,
 } from "./components";
 
-type View = "Command Center" | "Brand Intelligence" | "Campaign Studio" | "Distribution Center" | "Authority Graph" | "Packages";
+type View = "Command Center" | "Brand Intelligence" | "Campaign Studio" | "Distribution Center" | "Authority Graph" | "Reports" | "Packages";
 
 const navItems: Array<{ label: View; icon: typeof SquaresFour }> = [
   { label: "Command Center", icon: SquaresFour },
@@ -22,6 +22,7 @@ const navItems: Array<{ label: View; icon: typeof SquaresFour }> = [
   { label: "Campaign Studio", icon: Megaphone },
   { label: "Distribution Center", icon: GlobeHemisphereWest },
   { label: "Authority Graph", icon: CirclesFour },
+  { label: "Reports", icon: FileText },
   { label: "Packages", icon: Package },
 ];
 
@@ -60,11 +61,13 @@ function AppShell({ activeView, setActiveView, hasIntelligence, children }: { ac
   );
 }
 
-function TopBar({ activeView, hasIntelligence, persistence, canSignOut }: { activeView: View; hasIntelligence: boolean; persistence?: "local" | "saved"; canSignOut: boolean }) {
+function TopBar({ activeView, hasIntelligence, persistence, canSignOut, projects, projectId, selectProject, newProject }: { activeView: View; hasIntelligence: boolean; persistence?: "local" | "saved"; canSignOut: boolean; projects: ProjectSummary[]; projectId?: string; selectProject: (id: string) => void; newProject: () => void }) {
   return (
     <header className="topbar">
       <div><h1>{activeView}</h1><p>{activeView === "Command Center" ? "Outcome-first overview. Understand momentum at a glance." : "Launch intelligence grounded in verified evidence."}</p></div>
       <div className="topbar-actions">
+        {projects.length ? <select className="project-switcher" aria-label="Current project" value={projectId ?? ""} onChange={(event) => selectProject(event.target.value)}><option value="" disabled>Select project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select> : null}
+        {projects.length ? <button className="mode-button" onClick={newProject}>New project</button> : null}
         <EvidenceBadge state={hasIntelligence ? (persistence === "saved" ? "SAVED WORKSPACE" : "LOCAL ANALYSIS") : "GETTING STARTED"} tone={hasIntelligence && persistence === "saved" ? "positive" : "neutral"} />
         <button className="mode-button intelligence"><Brain size={15} /> Intelligence</button>
         <button className="mode-button authority"><ShieldCheck size={15} /> Authority</button>
@@ -193,19 +196,34 @@ function CommandCenter({ result, status, openCampaign }: { result: AnalysisResul
   );
 }
 
-function BrandIntelligence({ result, claims, editClaim, saveEvidence }: { result: PersistedAnalysisResult | null; claims: Claim[]; editClaim: (id: string, text: string) => void; saveEvidence: () => void }) {
+const findingKinds: Array<{ kind: FindingKind; label: string }> = [
+  { kind: "product", label: "Products" }, { kind: "audience", label: "Target audiences" },
+  { kind: "positioning", label: "Positioning" }, { kind: "founder", label: "Founders" },
+  { kind: "milestone", label: "Milestones" }, { kind: "proof_point", label: "Proof points" },
+  { kind: "competitor", label: "Competitors" },
+];
+
+function BrandIntelligence({ result, claims, editClaim, editProfile, editFinding, addFinding, saveEvidence, saveState }: { result: PersistedAnalysisResult | null; claims: Claim[]; editClaim: (id: string, text: string) => void; editProfile: (field: "company" | "product" | "audience" | "positioning", value: string) => void; editFinding: (kind: FindingKind, id: string, value: string) => void; addFinding: (kind: FindingKind) => void; saveEvidence: () => void; saveState: "idle" | "saving" | "saved" | "failed" }) {
   if (!result) return <EmptyIntelligence title="No company intelligence yet" body="Run intelligence from the Command Center to build a source-backed brand model." />;
   return (
     <div className="brand-intelligence-layout">
-      <BrandIntelligenceCard icon={Briefcase} label="Company identity" value={result.profile.company} state="VERIFIED" source={result.profile.sourceUrl} />
-      <BrandIntelligenceCard icon={RocketLaunch} label="Product" value={result.profile.product} state="VERIFIED" source={result.profile.sourceUrl} />
-      <BrandIntelligenceCard icon={Target} label="Positioning" value={result.profile.positioning} state={result.profile.positioning.startsWith("UNKNOWN") ? "UNKNOWN" : "VERIFIED"} source={result.profile.sourceUrl} wide />
-      <BrandIntelligenceCard icon={UserFocus} label="Audience" value={result.profile.audience} state="UNKNOWN" />
-      <BrandIntelligenceCard icon={Compass} label="Category & competitors" value="Requires founder confirmation and bounded competitor research." state="MISSING" />
+      <section className="surface profile-editor">
+        <div className="surface-heading"><div><span>Editable company profile</span><small>Corrections autosave and become founder-provided evidence</small></div><EvidenceBadge state={saveState === "saving" ? "SAVING" : saveState === "failed" ? "SAVE FAILED" : saveState === "saved" ? "SAVED" : "READY"} tone={saveState === "failed" ? "warning" : saveState === "saved" ? "positive" : "neutral"} /></div>
+        <div className="profile-fields">
+          <label>Company<input value={result.profile.company} onChange={(event) => editProfile("company", event.target.value)} /></label>
+          <label>Product<input value={result.profile.product} onChange={(event) => editProfile("product", event.target.value)} /></label>
+          <label>Audience<textarea value={result.profile.audience} onChange={(event) => editProfile("audience", event.target.value)} /></label>
+          <label>Positioning<textarea value={result.profile.positioning} onChange={(event) => editProfile("positioning", event.target.value)} /></label>
+        </div>
+      </section>
+      <section className="surface structured-findings">
+        <div className="surface-heading"><div><span>Structured findings</span><small>Every finding includes confidence, freshness, and an immutable evidence snapshot</small></div><EvidenceBadge state={`${Object.values(result.profile.findings).flat().length} FINDINGS`} tone="accent" /></div>
+        <div className="finding-groups">{findingKinds.map(({ kind, label }) => <div className="finding-group" key={kind}><div className="finding-group-title"><strong>{label}</strong><button onClick={() => addFinding(kind)}>Add</button></div>{result.profile.findings[kind].length ? result.profile.findings[kind].map((finding) => <div className="finding-row" key={finding.id}><textarea aria-label={`Edit ${label} finding`} value={finding.value} onChange={(event) => editFinding(kind, finding.id, event.target.value)} /><span>{Math.round(finding.confidence * 100)}% confidence<br />Observed {new Date(finding.observedAt).toLocaleDateString()}</span><a href={finding.sourceUrl} target="_blank" rel="noreferrer">Source</a></div>) : <p>No public finding yet.</p>}</div>)}</div>
+      </section>
       <section className="surface intelligence-claims">
         <div className="surface-heading"><div><span>Approved claims</span><small>Each claim retains its source and approval state</small></div><EvidenceBadge state={`${claims.filter((claim) => claim.approved).length}/${claims.length} APPROVED`} tone="neutral" /></div>
         {claims.map((claim) => <div className="intelligence-claim" key={claim.id}><EvidenceBadge state={claim.state} tone={claim.state === "VERIFIED" ? "positive" : "warning"} /><textarea aria-label={`Edit claim: ${claim.text}`} value={claim.text} onChange={(event) => editClaim(claim.id, event.target.value)} /><a href={claim.sourceUrl} target="_blank" rel="noreferrer">View source <ArrowRight size={12} /></a></div>)}
-        <div className="evidence-save"><button className="secondary-button" onClick={saveEvidence}>{result.persistence === "saved" ? "Save evidence edits" : "Apply evidence edits locally"}</button><span>Edited source claims become assumed until reviewed and approved.</span></div>
+        <div className="evidence-save"><button className="secondary-button" onClick={saveEvidence}>{saveState === "saving" ? "Saving…" : result.persistence === "saved" ? "Save now" : "Apply evidence edits locally"}</button><span>Edits autosave after a short pause. Edited source claims become assumed until reviewed and approved.</span></div>
       </section>
       <section className="surface missing-intelligence">
         <div className="surface-heading"><div><span>Missing intelligence</span><small>What the system still needs before paid distribution</small></div></div>
@@ -213,15 +231,16 @@ function BrandIntelligence({ result, claims, editClaim, saveEvidence }: { result
       </section>
       <section className="surface source-evidence">
         <div className="surface-heading"><div><span>Observed source pages</span><small>Bounded, same-origin crawl evidence</small></div><EvidenceBadge state={`${result.sources?.length ?? 1} SOURCES`} tone="positive" /></div>
-        <div className="source-grid">{(result.sources ?? [{ url: result.profile.sourceUrl, title: result.profile.company, description: result.profile.positioning }]).map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.url}><GlobeHemisphereWest size={17} weight="duotone" /><span><strong>{source.title || new URL(source.url).pathname}</strong><small>{new URL(source.url).pathname || "/"}</small></span><ArrowRight size={12} /></a>)}</div>
+        <div className="source-grid">{(result.sources ?? []).map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.id}><GlobeHemisphereWest size={17} weight="duotone" /><span><strong>{source.title || new URL(source.url).pathname}</strong><small>{new URL(source.url).pathname || "/"} · captured {new Date(source.capturedAt).toLocaleDateString()}</small></span><ArrowRight size={12} /></a>)}</div>
       </section>
     </div>
   );
 }
 
-function CampaignStudio({ result, claims, toggleClaim, approvable, status, approve, generate }: { result: AnalysisResult | null; claims: Claim[]; toggleClaim: (id: string) => void; approvable: boolean; status: string; approve: () => void; generate: () => void }) {
+function CampaignStudio({ result, claims, toggleClaim, approvable, status, approve, generate, editAsset, saveAssets, exportAssets, generationStatus }: { result: PersistedAnalysisResult | null; claims: Claim[]; toggleClaim: (id: string) => void; approvable: boolean; status: string; approve: () => void; generate: () => void; editAsset: (id: string, content: string) => void; saveAssets: (status: "draft" | "approved") => void; exportAssets: () => void; generationStatus: "idle" | "generating" | "saving" }) {
   if (!result) return <EmptyIntelligence title="Campaign intelligence is waiting" body="Analyze a company first. Launch Auth will turn verified facts into a defensible campaign narrative." />;
-  const generated = status === "campaign";
+  const campaign = result.campaign;
+  const generated = Boolean(campaign);
   return (
     <div className="campaign-studio">
       <div className="studio-flow">{["Discover", "Strategy", "Build", "Review", "Launch"].map((step, index) => <span className={index < 2 || generated ? "complete" : index === 2 ? "active" : ""} key={step}>{index < 2 || generated ? <Check size={13} /> : index + 1}{step}</span>)}</div>
@@ -234,33 +253,41 @@ function CampaignStudio({ result, claims, toggleClaim, approvable, status, appro
         {claims.map((claim) => <label className="premium-claim" key={claim.id}><input type="checkbox" checked={claim.approved} onChange={() => toggleClaim(claim.id)} /><span className="check-control"><Check size={12} /></span><div><strong>{claim.text}</strong><a href={claim.sourceUrl} target="_blank" rel="noreferrer">{new URL(claim.sourceUrl).hostname} <ArrowRight size={11} /></a></div><EvidenceBadge state={claim.state} tone={claim.state === "VERIFIED" ? "positive" : "warning"} /></label>)}
         <div className="review-actions"><button className="primary-button" disabled={!approvable || status === "approved" || generated} onClick={approve}>Approve claims <Check size={14} /></button><span>Approval unlocks campaign generation.</span></div>
       </section>
-      <div className="asset-grid">
-        {["Press Release", "Headlines", "Founder Quotes", "Company Boilerplate", "Product Hunt", "Directories", "Social", "FAQ", "Structured Data"].map((asset, index) => <CampaignAsset key={asset} name={asset} icon={index === 0 ? FileText : index < 4 ? Megaphone : index < 7 ? PaperPlaneTilt : ListChecks} state={generated ? "DRAFT READY" : "LOCKED"} />)}
-      </div>
-      <div className="studio-generate"><button className="primary-button" disabled={status !== "approved"} onClick={generate}>Build campaign draft <ArrowRight size={14} /></button>{generated ? <p role="status"><Check size={15} /> Campaign draft ready. Distribution remains disconnected.</p> : <p>Approve evidence before generation.</p>}</div>
+      {campaign ? <section className="surface campaign-editor">
+        <div className="surface-heading"><div><span>Campaign asset editor</span><small>Version {campaign.version} · {campaign.model} · generated {new Date(campaign.generatedAt).toLocaleString()}</small></div><EvidenceBadge state={campaign.status} tone={campaign.status === "approved" ? "positive" : "accent"} /></div>
+        <div className="campaign-editor-assets">{campaign.assets.map((asset) => <label key={asset.id}><span>{asset.title}<small>{asset.claimIds.length} approved evidence reference{asset.claimIds.length === 1 ? "" : "s"}</small></span><textarea value={asset.content} aria-label={`Edit ${asset.title}`} onChange={(event) => editAsset(asset.id, event.target.value)} /></label>)}</div>
+        <div className="campaign-editor-actions"><button className="secondary-button" disabled={generationStatus !== "idle"} onClick={() => saveAssets("draft")}>Save new version</button><button className="primary-button" disabled={generationStatus !== "idle"} onClick={() => saveAssets("approved")}>Approve campaign</button><button className="secondary-button" onClick={exportAssets}>Download assets</button><button className="secondary-button" disabled={generationStatus !== "idle"} onClick={generate}>Regenerate</button></div>
+      </section> : <div className="asset-grid">
+        {["Press Release", "Headlines", "Founder Quotes", "Company Boilerplate", "Social Posts", "Directory Copy", "FAQ", "Structured Data"].map((asset, index) => <CampaignAsset key={asset} name={asset} icon={index === 0 ? FileText : index < 4 ? Megaphone : index < 6 ? PaperPlaneTilt : ListChecks} state="LOCKED" />)}
+      </div>}
+      <div className="studio-generate"><button className="primary-button" disabled={(!generated && status !== "approved") || generationStatus !== "idle"} onClick={generate}>{generationStatus === "generating" ? "Generating evidence-bound assets…" : generated ? "Regenerate campaign" : "Build campaign draft"}<ArrowRight size={14} /></button>{generated ? <p role="status"><Check size={15} /> Real campaign assets are stored with version history. Distribution remains disconnected.</p> : <p>Approve evidence before generation.</p>}</div>
     </div>
   );
 }
 
-function DistributionCenter({ result }: { result: AnalysisResult | null }) {
+function DistributionCenter({ result, fulfillment, prepare, loading }: { result: PersistedAnalysisResult | null; fulfillment: FulfillmentState | null; prepare: () => void; loading: boolean }) {
   if (!result) return <EmptyIntelligence title="Distribution has not started" body="Analyze your company and approve a campaign first. Submission counts and placement statuses will appear only after real fulfillment begins." />;
+  const campaignApproved = result.campaign?.status === "approved";
+  const directories = fulfillment?.directories ?? [];
   return (
     <div className="distribution-center">
       <section className="surface distribution-hero">
         <div><EvidenceBadge state="FULFILLMENT STATUS" tone="accent" /><h2>0 / 0 outlets published</h2><p>Statuses stay truthful: submitted, editorial review, published, indexed, pending, or failed.</p></div>
-        <EvidenceBadge state="PROVIDER NOT CONNECTED" tone="warning" />
+        <EvidenceBadge state={fulfillment?.order ? `${fulfillment.order.provider} · ${fulfillment.order.status}` : campaignApproved ? "READY TO PREPARE" : "CAMPAIGN APPROVAL REQUIRED"} tone={fulfillment?.order ? "accent" : "warning"} />
       </section>
       <DistributionProgress published={0} processing={0} submitted={0} pending={0} demo={false} large />
       <section className="surface distribution-timeline">
         <div className="surface-heading"><div><span>Campaign timeline</span><small>Customer-facing fulfillment without supplier exposure</small></div></div>
         {[
           ["Strategy approved", "READY", "neutral"],
-          ["Press release approved", "WAITING", "warning"],
-          ["Distribution processing", "NOT STARTED", "neutral"],
-          ["Directory submissions", "NOT STARTED", "neutral"],
+          ["Campaign approved", campaignApproved ? "APPROVED" : "WAITING", campaignApproved ? "neutral" : "warning"],
+          ["Provider order", fulfillment?.order?.status?.replaceAll("_", " ").toUpperCase() ?? "NOT PREPARED", fulfillment?.order ? "neutral" : "warning"],
+          ["Directory submissions", directories.length ? `${directories.length} PREPARED` : "NOT PREPARED", "neutral"],
           ["Authority monitoring", "NOT ACTIVE", "neutral"],
         ].map(([label, state, tone]) => <div className="timeline-row" key={label}><span className="timeline-icon"><Check size={13} /></span><strong>{label}</strong><EvidenceBadge state={state} tone={tone as "neutral" | "warning"} /></div>)}
       </section>
+      {!fulfillment?.order ? <section className="surface fulfillment-prepare"><ShieldCheck size={22} weight="duotone" /><div><strong>Prepare fulfillment safely</strong><p>This creates a non-billable provider sandbox quote, a payment-blocked durable job, and assisted directory tasks. Nothing is submitted externally.</p></div><button className="primary-button" disabled={!campaignApproved || loading} onClick={prepare}>{loading ? "Preparing…" : "Prepare fulfillment"}</button></section> : null}
+      {directories.length ? <section className="surface directory-queue"><div className="surface-heading"><div><span>Assisted directory queue</span><small>Human and customer actions remain explicit</small></div></div>{directories.map((submission) => <div className="directory-row" key={submission.id}><div><strong>{submission.directory}</strong><small>{submission.mode}</small></div><p>{submission.requiredActions.join(" · ")}</p><EvidenceBadge state={submission.status} tone="warning" /></div>)}</section> : null}
       <section className="surface placement-ledger">
         <div className="surface-heading"><div><span>Placement evidence ledger</span><small>Only observed outcomes appear here</small></div></div>
         <PlacementCard title={result.profile.company} subtitle="Observed company homepage" state="PUBLISHED SOURCE" href={result.profile.sourceUrl} />
@@ -274,8 +301,22 @@ function AuthorityGraphScreen({ result }: { result: AnalysisResult | null }) {
   return <div className="graph-screen"><AuthorityGraph score={result.readiness.score} demo={false} expanded /><div className="graph-legend">{["Media", "Search", "Directories", "Backlinks", "AI", "Social"].map((item) => <span key={item}><i />{item}<small>0 verified nodes</small></span>)}</div><section className="surface graph-explanation"><Sparkle size={20} weight="duotone" /><div><h2>Your authority footprint</h2><p>The graph grows only as verified placements, directory approvals, indexed sources, backlinks, and detected authority signals are recorded.</p></div></section></div>;
 }
 
-function PackagesScreen() {
-  return <div className="packages-screen"><div className="package-intro"><h2>Choose the outcome, not a pile of placements.</h2><p>Pricing remains an experiment. Final fulfillment depends on verified supplier economics and campaign eligibility.</p></div><div className="package-grid"><PackageCard name="Launch" promise="Establish your presence." price="$299" features={["Launch intelligence", "Campaign creation", "Foundational distribution"]} /><PackageCard name="Authority" promise="Become difficult to ignore." price="$699" features={["Premium distribution", "Directory fulfillment", "Authority tracking"]} recommended /><PackageCard name="Authority+" promise="Own your category." price="$999" features={["Expanded distribution", "AI visibility observation", "Ongoing authority intelligence"]} /></div></div>;
+function ReportsScreen({ result, fulfillment }: { result: PersistedAnalysisResult | null; fulfillment: FulfillmentState | null }) {
+  if (!result?.projectId) return <EmptyIntelligence title="No authority report yet" body="Analyze a company first. Reports are generated only from saved evidence and observed outcomes." />;
+  const placementCount = fulfillment?.placements?.length ?? 0;
+  return <div className="reports-screen"><section className="surface report-hero"><FileText size={28} weight="duotone" /><div><EvidenceBadge state="SOURCE-BACKED" tone="positive" /><h2>{result.profile.company} authority report</h2><p>Includes immutable evidence hashes, approved claims, campaign asset status, directory progress, and every observed placement state.</p></div><a className="primary-button" href={`/api/projects/${result.projectId}/report?format=markdown`}>Download report <ArrowRight size={14} /></a></section><div className="report-metrics"><MetricCard icon={GlobeHemisphereWest} label="Evidence snapshots" value={result.sources?.length ?? 0} change="Captured and hashed" /><MetricCard icon={ShieldCheck} label="Approved claims" value={result.profile.claims.filter((claim) => claim.approved).length} change="Evidence-linked" /><MetricCard icon={Megaphone} label="Campaign assets" value={result.campaign?.assets.length ?? 0} change={result.campaign?.status ?? "Not generated"} /><MetricCard icon={Buildings} label="Observed placements" value={placementCount} change={placementCount ? "Live ledger" : "None observed"} /></div><section className="surface report-integrity"><ShieldCheck size={22} weight="duotone" /><div><strong>Report integrity</strong><p>Submitted, accepted, published, indexed, failed, and removed remain distinct. A source page or submission is never presented as a media placement.</p></div></section></div>;
+}
+
+type BillingOffer = { packageId: "launch" | "authority" | "authority_plus"; amount: number | null; currency: string; active: boolean; type: string };
+
+function PackagesScreen({ offers, eligible, checkoutLoading, checkout }: { offers: BillingOffer[]; eligible: boolean; checkoutLoading: boolean; checkout: (packageId: BillingOffer["packageId"]) => void }) {
+  const price = (packageId: BillingOffer["packageId"]) => {
+    const offer = offers.find((candidate) => candidate.packageId === packageId);
+    if (!offer?.active || offer.type !== "one_time" || offer.amount == null) return "Not configured";
+    return new Intl.NumberFormat(undefined, { style: "currency", currency: offer.currency.toUpperCase(), maximumFractionDigits: 0 }).format(offer.amount / 100);
+  };
+  const enabled = (packageId: BillingOffer["packageId"]) => eligible && !checkoutLoading && price(packageId) !== "Not configured";
+  return <div className="packages-screen"><div className="package-intro"><h2>Choose the outcome, not a pile of placements.</h2><p>{eligible ? "Your campaign and fulfillment order are eligible for secure Stripe Checkout." : "Checkout unlocks only after the campaign is approved and an eligible fulfillment order is prepared. Live charges remain disabled for sandbox fulfillment."}</p></div><div className="package-grid"><PackageCard name="Launch" promise="Establish your presence." price={price("launch")} features={["Launch intelligence", "Campaign creation", "Foundational distribution"]} disabled={!enabled("launch")} action={() => checkout("launch")} /><PackageCard name="Authority" promise="Become difficult to ignore." price={price("authority")} features={["Premium distribution", "Directory fulfillment", "Authority tracking"]} recommended disabled={!enabled("authority")} action={() => checkout("authority")} /><PackageCard name="Authority+" promise="Own your category." price={price("authority_plus")} features={["Expanded distribution", "AI visibility observation", "Ongoing authority intelligence"]} disabled={!enabled("authority_plus")} action={() => checkout("authority_plus")} /></div></div>;
 }
 
 function EmptyIntelligence({ title, body }: { title: string; body: string }) {
@@ -290,7 +331,23 @@ export default function Home() {
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "approved" | "campaign">("idle");
   const [error, setError] = useState("");
   const [persistenceEnabled, setPersistenceEnabled] = useState(false);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [autosaveRevision, setAutosaveRevision] = useState(0);
+  const [generationStatus, setGenerationStatus] = useState<"idle" | "generating" | "saving">("idle");
+  const [fulfillment, setFulfillment] = useState<FulfillmentState | null>(null);
+  const [fulfillmentLoading, setFulfillmentLoading] = useState(false);
+  const [billingOffers, setBillingOffers] = useState<BillingOffer[]>([]);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
   const approvable = useMemo(() => claims.length > 0 && claims.every((claim) => claim.approved), [claims]);
+
+  function applyProject(project: PersistedAnalysisResult) {
+    setResult(project);
+    setClaims(project.profile.claims);
+    setUrl(project.profile.sourceUrl);
+    setStatus(project.campaignStatus === "draft_ready" ? "campaign" : project.campaignStatus === "approved" ? "approved" : "ready");
+    setSaveState("saved");
+  }
 
   useEffect(() => {
     let active = true;
@@ -303,18 +360,47 @@ export default function Home() {
         if (!response.ok) return null;
         const payload = await response.json();
         if (active) setPersistenceEnabled(Boolean(payload.configured));
+        if (active) setProjects(payload.projects ?? []);
         return payload.project as PersistedAnalysisResult | null;
       })
       .then((project) => {
         if (!active || !project) return;
-        setResult(project);
-        setClaims(project.profile.claims);
-        setUrl(project.profile.sourceUrl);
-        setStatus(project.campaignStatus === "draft_ready" ? "campaign" : project.campaignStatus === "approved" ? "approved" : "ready");
+        applyProject(project);
       })
       .catch(() => undefined);
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!autosaveRevision || !result) return;
+    const timer = window.setTimeout(() => void saveCampaign("evidence_review", true), 900);
+    return () => window.clearTimeout(timer);
+    // autosaveRevision intentionally represents a complete edit snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autosaveRevision]);
+
+  useEffect(() => {
+    if ((activeView !== "Distribution Center" && activeView !== "Packages" && activeView !== "Reports") || !result?.projectId) return;
+    let active = true;
+    fetch(`/api/projects/${result.projectId}/fulfillment`, { cache: "no-store" }).then(async (response) => {
+      const payload = await response.json();
+      if (response.status === 401) return void window.location.assign("/login");
+      if (!response.ok) throw new Error(payload.error ?? "Unable to load fulfillment.");
+      if (active) setFulfillment(payload.fulfillment);
+    }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Unable to load fulfillment."); });
+    return () => { active = false; };
+  }, [activeView, result?.projectId]);
+
+  useEffect(() => {
+    if (activeView !== "Packages") return;
+    let active = true;
+    fetch("/api/billing/packages", { cache: "no-store" }).then(async (response) => {
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Billing packages are unavailable.");
+      if (active) setBillingOffers(payload.offers ?? []);
+    }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Billing packages are unavailable."); });
+    return () => { active = false; };
+  }, [activeView]);
 
   async function submit(event: FormEvent) {
     event.preventDefault(); setError(""); setStatus("loading");
@@ -326,7 +412,11 @@ export default function Home() {
         return;
       }
       if (!response.ok) throw new Error(payload.error ?? "Analysis failed.");
-      setResult(payload); setClaims(payload.profile.claims); setStatus("ready");
+      applyProject(payload);
+      if (payload.projectId) {
+        const summary: ProjectSummary = { id: payload.projectId, name: payload.profile.company, url: payload.profile.sourceUrl, campaignStatus: "evidence_review", updatedAt: payload.fetchedAt };
+        setProjects((current) => [summary, ...current.filter((project) => project.id !== payload.projectId)]);
+      }
     } catch (caught) {
       setResult(null); setClaims([]); setError(caught instanceof Error ? caught.message : "Analysis failed."); setStatus("idle");
     }
@@ -336,20 +426,41 @@ export default function Home() {
 
   function editClaim(id: string, text: string) {
     setClaims((current) => current.map((claim) => claim.id === id ? { ...claim, text, state: "ASSUMED", approved: false } : claim));
-    setStatus("ready");
+    setStatus("ready"); setSaveState("idle"); setAutosaveRevision((revision) => revision + 1);
   }
 
-  async function saveCampaign(nextStatus: "evidence_review" | "approved" | "campaign") {
+  function editProfile(field: "company" | "product" | "audience" | "positioning", value: string) {
+    setResult((current) => current ? { ...current, profile: { ...current.profile, [field]: value } } : current);
+    setStatus("ready"); setSaveState("idle"); setAutosaveRevision((revision) => revision + 1);
+  }
+
+  function editFinding(kind: FindingKind, id: string, value: string) {
+    setResult((current) => current ? { ...current, profile: { ...current.profile, findings: { ...current.profile.findings, [kind]: current.profile.findings[kind].map((finding) => finding.id === id ? { ...finding, value, confidence: Math.min(finding.confidence, 0.6) } : finding) } } } : current);
+    setStatus("ready"); setSaveState("idle"); setAutosaveRevision((revision) => revision + 1);
+  }
+
+  function addFinding(kind: FindingKind) {
+    if (!result) return;
+    const source = result.sources?.[0];
+    if (!source) return;
+    const finding = { id: `manual-${kind}-${Date.now()}`, kind, value: "Founder confirmation required", sourceUrl: source.url, evidenceId: source.id, confidence: 0.5, observedAt: new Date().toISOString() };
+    setResult((current) => current ? { ...current, profile: { ...current.profile, findings: { ...current.profile.findings, [kind]: [...current.profile.findings[kind], finding] } } } : current);
+    setStatus("ready"); setSaveState("idle"); setAutosaveRevision((revision) => revision + 1);
+  }
+
+  async function saveCampaign(nextStatus: "evidence_review" | "approved" | "campaign", autosave = false) {
     setError("");
     if (!result?.projectId) {
       setStatus(nextStatus === "evidence_review" ? "ready" : nextStatus);
+      setSaveState("saved");
       return;
     }
+    if (autosave || nextStatus === "evidence_review") setSaveState("saving");
     try {
       const response = await fetch(`/api/projects/${result.projectId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ claims, status: nextStatus }),
+        body: JSON.stringify({ profile: { ...result.profile, claims }, claims, status: nextStatus }),
       });
       const payload = await response.json();
       if (response.status === 401) {
@@ -358,23 +469,124 @@ export default function Home() {
       }
       if (!response.ok) throw new Error(payload.error ?? "Unable to save the campaign.");
       setStatus(nextStatus === "evidence_review" ? "ready" : nextStatus);
-      setResult((current) => current ? { ...current, campaignStatus: nextStatus === "campaign" ? "draft_ready" : nextStatus } : current);
+      setResult((current) => current ? { ...current, profile: { ...current.profile, claims }, campaignStatus: nextStatus === "campaign" ? "draft_ready" : nextStatus } : current);
+      setProjects((current) => current.map((project) => project.id === result.projectId ? { ...project, name: result.profile.company, campaignStatus: nextStatus === "campaign" ? "draft_ready" : nextStatus, updatedAt: new Date().toISOString() } : project));
+      setSaveState("saved");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to save the campaign.");
+      setSaveState("failed");
+    }
+  }
+
+  async function selectProject(projectId: string) {
+    if (!projectId || projectId === result?.projectId) return;
+    setError(""); setSaveState("idle");
+    try {
+      const response = await fetch(`/api/projects/${projectId}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (response.status === 401) return void window.location.assign("/login");
+      if (!response.ok) throw new Error(payload.error ?? "Unable to load the project.");
+      applyProject(payload.project);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to load the project.");
+    }
+  }
+
+  function newProject() {
+    setResult(null); setClaims([]); setUrl(""); setStatus("idle"); setError(""); setSaveState("idle"); setActiveView("Command Center");
+  }
+
+  async function generateCampaign() {
+    if (!result?.projectId) return setError("Save the project before generating a campaign.");
+    setError(""); setGenerationStatus("generating");
+    try {
+      const response = await fetch(`/api/projects/${result.projectId}/campaign/generate`, { method: "POST" });
+      const payload = await response.json();
+      if (response.status === 401) return void window.location.assign("/login");
+      if (!response.ok) throw new Error(payload.error ?? "Unable to generate the campaign.");
+      setResult((current) => current ? { ...current, campaign: payload.campaign, campaignStatus: "draft_ready" } : current);
+      setStatus("campaign");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to generate the campaign.");
+    } finally {
+      setGenerationStatus("idle");
+    }
+  }
+
+  function editCampaignAsset(id: string, content: string) {
+    setResult((current) => current?.campaign ? { ...current, campaign: { ...current.campaign, status: "draft", assets: current.campaign.assets.map((asset) => asset.id === id ? { ...asset, content, status: "draft" } : asset) } } : current);
+  }
+
+  async function saveCampaignAssets(nextStatus: "draft" | "approved") {
+    if (!result?.projectId || !result.campaign) return;
+    setError(""); setGenerationStatus("saving");
+    try {
+      const response = await fetch(`/api/projects/${result.projectId}/campaign`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ assets: result.campaign.assets, status: nextStatus }) });
+      const payload = await response.json();
+      if (response.status === 401) return void window.location.assign("/login");
+      if (!response.ok) throw new Error(payload.error ?? "Unable to save the campaign.");
+      setResult((current) => current ? { ...current, campaign: payload.campaign } : current);
+      if (nextStatus === "approved") setProjects((current) => current.map((project) => project.id === result.projectId ? { ...project, campaignStatus: "campaign_approved" } : project));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to save the campaign.");
+    } finally {
+      setGenerationStatus("idle");
+    }
+  }
+
+  function exportCampaignAssets() {
+    if (!result?.campaign) return;
+    const markdown = result.campaign.assets.map((asset) => `# ${asset.title}\n\n${asset.content}\n\nEvidence: ${asset.claimIds.join(", ")}`).join("\n\n---\n\n");
+    const href = URL.createObjectURL(new Blob([markdown], { type: "text/markdown" }));
+    const anchor = document.createElement("a");
+    anchor.href = href; anchor.download = `${result.profile.company.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-campaign-v${result.campaign.version}.md`; anchor.click();
+    URL.revokeObjectURL(href);
+  }
+
+  async function prepareFulfillmentState() {
+    if (!result?.projectId) return;
+    setError(""); setFulfillmentLoading(true);
+    try {
+      const response = await fetch(`/api/projects/${result.projectId}/fulfillment`, { method: "POST" });
+      const payload = await response.json();
+      if (response.status === 401) return void window.location.assign("/login");
+      if (!response.ok) throw new Error(payload.error ?? "Unable to prepare fulfillment.");
+      setFulfillment(payload.fulfillment);
+      setResult((current) => current ? { ...current, campaignStatus: "awaiting_payment" } : current);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to prepare fulfillment.");
+    } finally {
+      setFulfillmentLoading(false);
+    }
+  }
+
+  async function startCheckout(packageId: BillingOffer["packageId"]) {
+    if (!result?.projectId) return;
+    setError(""); setCheckoutLoading(true);
+    try {
+      const response = await fetch(`/api/projects/${result.projectId}/checkout`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ packageId }) });
+      const payload = await response.json();
+      if (response.status === 401) return void window.location.assign("/login");
+      if (!response.ok) throw new Error(payload.error ?? "Unable to start checkout.");
+      window.location.assign(payload.url);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to start checkout.");
+      setCheckoutLoading(false);
     }
   }
 
   return (
     <AppShell activeView={activeView} setActiveView={setActiveView} hasIntelligence={Boolean(result)}>
-      <TopBar activeView={activeView} hasIntelligence={Boolean(result)} persistence={result?.persistence} canSignOut={persistenceEnabled} />
+      <TopBar activeView={activeView} hasIntelligence={Boolean(result)} persistence={result?.persistence} canSignOut={persistenceEnabled} projects={projects} projectId={result?.projectId} selectProject={(id) => void selectProject(id)} newProject={newProject} />
       {error && activeView !== "Command Center" ? <p className="workspace-error" role="alert">{error}</p> : null}
       {activeView === "Command Center" ? <IntelligenceInput url={url} setUrl={setUrl} submit={submit} status={status} error={error} /> : null}
       {activeView === "Command Center" ? <CommandCenter result={result} status={status} openCampaign={() => setActiveView("Campaign Studio")} /> : null}
-      {activeView === "Brand Intelligence" ? <BrandIntelligence result={result} claims={claims} editClaim={editClaim} saveEvidence={() => void saveCampaign("evidence_review")} /> : null}
-      {activeView === "Campaign Studio" ? <CampaignStudio result={result} claims={claims} toggleClaim={toggleClaim} approvable={approvable} status={status} approve={() => void saveCampaign("approved")} generate={() => void saveCampaign("campaign")} /> : null}
-      {activeView === "Distribution Center" ? <DistributionCenter result={result} /> : null}
+      {activeView === "Brand Intelligence" ? <BrandIntelligence result={result} claims={claims} editClaim={editClaim} editProfile={editProfile} editFinding={editFinding} addFinding={addFinding} saveEvidence={() => void saveCampaign("evidence_review")} saveState={saveState} /> : null}
+      {activeView === "Campaign Studio" ? <CampaignStudio result={result} claims={claims} toggleClaim={toggleClaim} approvable={approvable} status={status} approve={() => void saveCampaign("approved")} generate={() => void generateCampaign()} editAsset={editCampaignAsset} saveAssets={(nextStatus) => void saveCampaignAssets(nextStatus)} exportAssets={exportCampaignAssets} generationStatus={generationStatus} /> : null}
+      {activeView === "Distribution Center" ? <DistributionCenter result={result} fulfillment={fulfillment} prepare={() => void prepareFulfillmentState()} loading={fulfillmentLoading} /> : null}
       {activeView === "Authority Graph" ? <AuthorityGraphScreen result={result} /> : null}
-      {activeView === "Packages" ? <PackagesScreen /> : null}
+      {activeView === "Reports" ? <ReportsScreen result={result} fulfillment={fulfillment} /> : null}
+      {activeView === "Packages" ? <PackagesScreen offers={billingOffers} eligible={result?.campaign?.status === "approved" && fulfillment?.order?.status === "awaiting_payment"} checkoutLoading={checkoutLoading} checkout={(packageId) => void startCheckout(packageId)} /> : null}
     </AppShell>
   );
 }

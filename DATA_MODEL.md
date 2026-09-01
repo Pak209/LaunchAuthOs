@@ -15,6 +15,23 @@
 
 All externally observed claims should link to one or more evidence items.
 
-## Firebase V0.1 layout
+## Firebase V0.2 layout
 
-The current thin slice uses `workspaces/{workspaceId}` with `members/{uid}` and `projects/{projectId}` subcollections. Brand profile, readiness, bounded sources, evidence claims, and campaign state are stored together in each project document so analysis updates and approval transitions remain atomic within Firestore's document boundary. Higher-volume placements, reports, jobs, and monitoring snapshots will move into project subcollections as those phases are implemented.
+The production foundation now uses these tenant-isolated records:
+
+- `users/{uid}`: account profile and last-seen metadata.
+- `workspaces/{workspaceId}` and `members/{uid}`: tenant and role boundary.
+- `projects/{projectId}`: resumable project summary, readiness, and lifecycle state.
+- `projects/{projectId}/profiles/current`: editable structured brand profile.
+- `projects/{projectId}/evidence/{snapshotId}`: immutable source excerpt, content hash, and capture time.
+- `projects/{projectId}/claims/{claimId}`: editable claim, evidence links, confidence, and approval.
+- `projects/{projectId}/campaigns/current`: evidence-gated campaign state and approved claim IDs.
+- `projects/{projectId}/campaignApprovals/current`: server-owned digest and version attesting to the exact customer-approved campaign.
+- `projects/{projectId}/orders/current`: provider quote, campaign digest/version, expected Stripe checkout binding, billing state, refund totals, and fulfillment state.
+- `projects/{projectId}/jobs/{jobId}`: durable state, attempts, consecutive failures, idempotency key, lease token/expiry, retry time, and last error.
+- `projects/{projectId}/directorySubmissions/{directoryId}`: assisted/manual customer actions and observed outcome.
+- `projects/{projectId}/placements/{placementId}`: submitted/accepted/published/indexed/failed/removed state, provider observation, public URL, HTTP result, and first/last verification.
+- `projects/{projectId}/auditLogs/{eventId}`: server-owned approval, billing, fulfillment, verification, and administrator actions.
+- `stripeEvents/{eventId}`: signed Stripe webhook idempotency ledger.
+
+The project document retains a denormalized current view for fast resume and backward compatibility. Customer-readable data stays tenant-scoped; campaign approvals, orders, jobs, placements, audit logs, and Stripe events are written only by server-controlled code.

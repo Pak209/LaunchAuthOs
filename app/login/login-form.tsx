@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { ArrowRight, CirclesFour, LockKey, ShieldCheck } from "@phosphor-icons/react";
-import { createUserWithEmailAndPassword, inMemoryPersistence, setPersistence, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { createUserWithEmailAndPassword, inMemoryPersistence, sendEmailVerification, sendPasswordResetEmail, setPersistence, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { getFirebaseClientAuth } from "@/lib/firebase/client";
 
 export default function LoginForm({ initialError }: { initialError: string }) {
@@ -11,10 +11,12 @@ export default function LoginForm({ initialError }: { initialError: string }) {
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState<"idle" | "loading">("idle");
   const [error, setError] = useState(initialError);
+  const [notice, setNotice] = useState("");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setNotice("");
     setStatus("loading");
     try {
       const auth = getFirebaseClientAuth();
@@ -22,6 +24,7 @@ export default function LoginForm({ initialError }: { initialError: string }) {
       const credential = mode === "signin"
         ? await signInWithEmailAndPassword(auth, email, password)
         : await createUserWithEmailAndPassword(auth, email, password);
+      if (mode === "signup" && !credential.user.emailVerified) await sendEmailVerification(credential.user);
       const idToken = await credential.user.getIdToken(true);
       const response = await fetch("/api/auth/session", {
         method: "POST",
@@ -35,6 +38,17 @@ export default function LoginForm({ initialError }: { initialError: string }) {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to authenticate.");
       setStatus("idle");
+    }
+  }
+
+  async function resetPassword() {
+    setError(""); setNotice("");
+    if (!email) return setError("Enter your email address first.");
+    try {
+      await sendPasswordResetEmail(getFirebaseClientAuth(), email);
+      setNotice("If that address has an account, Firebase has sent password reset instructions.");
+    } catch {
+      setNotice("If that address has an account, Firebase has sent password reset instructions.");
     }
   }
 
@@ -56,11 +70,13 @@ export default function LoginForm({ initialError }: { initialError: string }) {
             <label>Email<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
             <label>Password<input type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
             {error ? <p className="auth-error" role="alert">{error}</p> : null}
+            {notice ? <p className="auth-notice" role="status">{notice}</p> : null}
             <button className="primary-button" disabled={status === "loading"}>{status === "loading" ? "Please wait…" : mode === "signin" ? "Sign in" : "Create workspace"}<ArrowRight size={15} /></button>
           </form>
           <button className="auth-mode" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); setStatus("idle"); }}>
             {mode === "signin" ? "New to Launch Auth? Create a workspace" : "Already have an account? Sign in"}
           </button>
+          {mode === "signin" ? <button className="auth-reset" onClick={() => void resetPassword()}>Forgot your password?</button> : null}
           <div className="auth-security"><LockKey size={14} />Firebase identity tokens are kept in HTTP-only session cookies.</div>
         </div>
       </section>

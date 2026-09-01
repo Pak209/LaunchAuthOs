@@ -26,13 +26,19 @@ service cloud.firestore {
       return isMember(workspaceId) && memberRole(workspaceId) in ['owner', 'admin'];
     }
 
+    match /users/{userId} {
+      allow read, create, update: if signedIn() && request.auth.uid == userId;
+      allow delete: if false;
+    }
+
     match /workspaces/{workspaceId} {
       allow read: if isMember(workspaceId);
       allow create: if signedIn()
         && request.resource.data.createdBy == request.auth.uid;
       allow update: if canAdmin(workspaceId)
         && request.resource.data.createdBy == resource.data.createdBy;
-      allow delete: if isMember(workspaceId) && memberRole(workspaceId) == 'owner';
+      allow delete: if signedIn()
+        && resource.data.createdBy == request.auth.uid;
 
       match /members/{memberId} {
         allow read: if isMember(workspaceId);
@@ -41,7 +47,10 @@ service cloud.firestore {
           && request.resource.data.userId == request.auth.uid
           && request.resource.data.role == 'owner'
           && getAfter(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid;
-        allow update, delete: if false;
+        allow update: if false;
+        allow delete: if signedIn()
+          && memberId == request.auth.uid
+          && resource.data.role == 'owner';
       }
 
       match /projects/{projectId} {
@@ -49,12 +58,80 @@ service cloud.firestore {
         allow create: if canEdit(workspaceId)
           && request.resource.data.workspaceId == workspaceId
           && request.resource.data.createdBy == request.auth.uid
-          && request.resource.data.lifecycleStatus in ['evidence_review', 'approved', 'draft_ready'];
+          && request.resource.data.lifecycleStatus in ['evidence_review', 'approved', 'draft_ready', 'campaign_approved', 'awaiting_payment', 'fulfillment'];
         allow update: if canEdit(workspaceId)
           && request.resource.data.workspaceId == resource.data.workspaceId
           && request.resource.data.createdBy == resource.data.createdBy
-          && request.resource.data.lifecycleStatus in ['evidence_review', 'approved', 'draft_ready'];
+          && request.resource.data.lifecycleStatus in ['evidence_review', 'approved', 'draft_ready', 'campaign_approved', 'awaiting_payment', 'fulfillment'];
         allow delete: if canAdmin(workspaceId);
+
+        match /profiles/{profileId} {
+          allow read: if isMember(workspaceId);
+          allow create, update: if canEdit(workspaceId);
+          allow delete: if canAdmin(workspaceId)
+            && !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId));
+        }
+
+        match /evidence/{evidenceId} {
+          allow read: if isMember(workspaceId);
+          allow create: if canEdit(workspaceId)
+            && request.resource.data.id == evidenceId
+            && request.resource.data.url is string
+            && request.resource.data.contentHash is string;
+          allow update: if false;
+          allow delete: if canAdmin(workspaceId)
+            && !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId));
+        }
+
+        match /claims/{claimId} {
+          allow read: if isMember(workspaceId);
+          allow create, update: if canEdit(workspaceId)
+            && request.resource.data.id == claimId;
+          allow delete: if canAdmin(workspaceId)
+            && !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId));
+        }
+
+        match /campaigns/{campaignId} {
+          allow read: if isMember(workspaceId);
+          allow create, update: if canEdit(workspaceId);
+          allow delete: if canAdmin(workspaceId);
+
+          match /versions/{versionId} {
+            allow read: if isMember(workspaceId);
+            allow create: if canEdit(workspaceId);
+            allow update: if false;
+            allow delete: if canAdmin(workspaceId)
+              && !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId));
+          }
+        }
+
+        match /campaignApprovals/{approvalId} {
+          allow read, write: if false;
+        }
+
+        match /orders/{orderId} {
+          allow read: if isMember(workspaceId);
+          allow write: if false;
+        }
+
+        match /directorySubmissions/{submissionId} {
+          allow read: if isMember(workspaceId);
+          allow write: if false;
+        }
+
+        match /jobs/{jobId} {
+          allow read: if isMember(workspaceId);
+          allow write: if false;
+        }
+
+        match /placements/{placementId} {
+          allow read: if isMember(workspaceId);
+          allow write: if false;
+        }
+
+        match /auditLogs/{logId} {
+          allow read, write: if false;
+        }
       }
     }
 
@@ -63,4 +140,3 @@ service cloud.firestore {
     }
   }
 }
-

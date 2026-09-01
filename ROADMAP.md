@@ -2,19 +2,19 @@
 
 ## Now
 
-- Firebase authentication and persistence foundation implemented; console activation and live rules verification pending.
-- Supplier due diligence and evidence matrix (initial public pass complete; quotes/contract checks pending).
-- Directory automation investigation (initial public pass complete; hands-on flow tests pending).
-- Unit economics with assumptions separated from verified costs (first-pass model complete).
-- MVP architecture and data model (draft complete; implementation boundary next).
+- Firebase authentication, normalized persistence, multi-project resume, autosave, immutable evidence, server-owned approvals, and tenant rules are implemented.
+- Bounded multi-page intelligence and editable products, audiences, positioning, founders, milestones, proof points, competitors, confidence, and freshness are implemented.
+- Real, versioned, evidence-bounded AI campaign generation and downloadable evidence reports are implemented; production model credentials remain a deployment gate.
+- Stripe Checkout/webhooks, exact paid-order reconciliation, partial/full refund accounting, and non-billable sandbox protection are implemented.
+- Durable fulfillment/email/verification jobs, internal queue, retry controls, placement monitoring, and removed-link detection are implemented.
+- Finish supplier contracting, actual cost verification, named provider adapter, legal approval, production infrastructure, and controlled-beta operations.
 
 ## Next
 
-- Expand the bounded multi-page collector with structured founder, milestone, audience, proof, and competitor extraction.
-- Connect the Firebase Web app and verify Firestore tenant isolation with two test accounts and the Rules emulator.
-- Add one provider adapter in sandbox/test mode after contract and API validation.
-- Add one assisted directory adapter after account-level flow testing.
-- Generate a downloadable evidence-backed report.
+- Implement the selected provider adapter against its sandbox and production API.
+- Complete hands-on assisted-directory fulfillment tests and document the operator playbook.
+- Configure production hosting, domain, email, error monitoring, backups, scheduler, Stripe, Firebase Admin, and OpenAI secrets.
+- Run the full release procedure in `PRODUCTION_READINESS.md` and invite 3–5 controlled beta customers.
 
 ## Later
 
@@ -24,4 +24,4 @@
 
 ## Gate
 
-Do not commit to production fulfillment architecture until the supplier matrix, economics, directory matrix, and thin-slice design are sufficiently validated.
+Do not enable live checkout until `/api/internal/readiness` is fully green, the selected provider lifecycle passes sandbox testing, supplier costs and margins are verified, and the legal/operations release gates are explicitly approved.

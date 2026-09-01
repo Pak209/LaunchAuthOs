@@ -16,7 +16,25 @@ describe("company analysis", () => {
     expect(result.profile.positioning).toBe("A release platform for small teams.");
     expect(result.profile.claims).toHaveLength(2);
     expect(result.profile.claims.every((claim) => claim.state === "VERIFIED")).toBe(true);
+    expect(result.sources?.[0]).toMatchObject({ url: "https://acme.example/", description: "A release platform for small teams." });
+    expect(result.sources?.[0].contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.profile.findings.positioning[0].confidence).toBeGreaterThan(0.9);
     expect(result.readiness.score).toBe(82);
+  });
+
+  it("extracts structured audiences, founders, milestones, proof points, and competitors", async () => {
+    const html = `<html><head><title>Acme</title><meta name="description" content="Launch software for independent teams."></head><body>
+      <h1>Acme Launch Cloud</h1><p>Founded by Ada Lovelace. Built for startup marketing teams.</p>
+      <p>Acme launched in 2024 and now serves 12,000 customers.</p><p>An alternative to Legacy Press.</p></body></html>`;
+    const fetcher = vi.fn(async () => new Response(html, { status: 200, headers: { "content-type": "text/html" } }));
+
+    const result = await analyzeCompany("https://acme.example", fetcher as typeof fetch, publicResolver as never);
+
+    expect(result.profile.findings.audience.some((finding) => /teams/i.test(finding.value))).toBe(true);
+    expect(result.profile.findings.founder.some((finding) => finding.value === "Ada Lovelace")).toBe(true);
+    expect(result.profile.findings.milestone.some((finding) => /2024/.test(finding.value))).toBe(true);
+    expect(result.profile.findings.proof_point.some((finding) => /12,000/.test(finding.value))).toBe(true);
+    expect(result.profile.findings.competitor.some((finding) => /Legacy Press/.test(finding.value))).toBe(true);
   });
 
   it("rejects non-HTML responses", async () => {
