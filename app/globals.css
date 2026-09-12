@@ -280,6 +280,8 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid 
 .campaign-editor-assets label { min-width: 0; padding: 14px; display: grid; gap: 9px; border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
 .campaign-editor-assets label:nth-child(2n) { border-right: 0; }
 .campaign-editor-assets label > span { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #dce3ef; text-transform: uppercase; font-size: 9px; letter-spacing: .055em; font-weight: 700; }
+.campaign-editor-assets label > span > input { min-width: 0; flex: 1; padding: 7px 8px; color: #dce3ef; border: 1px solid #334158; border-radius: 6px; outline: 0; background: #070e19; font: inherit; text-transform: none; letter-spacing: 0; }
+.campaign-editor-assets label > span > input:focus { border-color: #7054d0; }
 .campaign-editor-assets label small { color: var(--muted-2); text-transform: none; letter-spacing: 0; font-size: 8px; font-weight: 500; }
 .campaign-editor-assets textarea { min-height: 210px; padding: 12px; resize: vertical; color: #dce3ef; border: 1px solid #334158; border-radius: 7px; outline: 0; background: #070e19; font: inherit; font-size: 11px; line-height: 1.55; }
 .campaign-editor-assets textarea:focus { border-color: #7054d0; }
@@ -298,11 +300,18 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid 
 .distribution-progress.large .map-visual { min-height: 410px; }
 .distribution-progress.large .distribution-counts strong { font-size: 27px; }
 .distribution-timeline, .placement-ledger { min-height: 300px; }
-.fulfillment-prepare { grid-column: span 2; padding: 17px; display: grid; grid-template-columns: 30px 1fr auto; gap: 12px; align-items: center; }
+.fulfillment-prepare { grid-column: span 2; padding: 17px; display: grid; grid-template-columns: 30px minmax(180px,.7fr) minmax(380px,1.3fr) auto; gap: 12px; align-items: end; }
 .fulfillment-prepare > svg { color: var(--green); }
 .fulfillment-prepare strong { font-size: 12px; }
 .fulfillment-prepare p { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .fulfillment-prepare .primary-button { min-height: 36px; margin-top: 0; padding: 0 14px; }
+.fulfillment-copy { align-self: center; }
+.distribution-intake-fields { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 9px; }
+.distribution-intake-fields label { grid-column: span 2; }
+.distribution-intake-fields label { display: grid; gap: 5px; }
+.distribution-intake-fields span { color: var(--muted); font-size: 8px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.distribution-intake-fields input, .distribution-intake-fields select { width: 100%; min-width: 0; height: 36px; padding: 0 9px; color: var(--text); border: 1px solid #334158; border-radius: 7px; outline: 0; background: #070e19; font-size: 10px; }
+.distribution-intake-fields input:focus, .distribution-intake-fields select:focus { border-color: #7054d0; }
 .directory-queue { grid-column: span 2; }
 .directory-row { min-height: 68px; padding: 12px 14px; display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 14px; align-items: center; border-bottom: 1px solid var(--line-soft); }
 .directory-row > div { display: grid; gap: 4px; }
@@ -406,6 +415,23 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid 
 .admin-table-row button { min-height: 30px; padding: 0 10px; color: #e4deff; border: 1px solid #493a75; border-radius: 6px; background: #18142b; font-size: 9px; }
 .admin-empty, .admin-error { padding: 18px; color: var(--muted); font-size: 11px; }
 .admin-error { color: #ffb0b3; }
+.admin-provider, .admin-orders, .admin-section-title { margin-bottom: 16px; }
+.admin-provider { padding: 18px; display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 18px; align-items: center; border: 1px solid var(--line); border-radius: var(--radius); background: #09111d; }
+.admin-provider > div > span, .admin-section-title > span { color: var(--violet-bright); text-transform: uppercase; font-size: 8px; letter-spacing: .07em; }
+.admin-provider h2, .admin-section-title h2 { margin: 5px 0; font-size: 17px; font-weight: 500; }
+.admin-provider p, .admin-section-title p { margin: 0; color: var(--muted); font-size: 10px; }
+.admin-provider-actions { display: flex; gap: 8px; }
+.admin-provider select, .admin-provider button { min-height: 34px; padding: 0 12px; color: #e4deff; border: 1px solid #493a75; border-radius: 6px; background: #18142b; font-size: 9px; }
+.admin-provider dl { grid-column: 1 / -1; margin: 0; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line-soft); }
+.admin-provider dl div { padding-top: 12px; display: grid; gap: 4px; }
+.admin-provider dt { color: var(--muted-2); text-transform: uppercase; font-size: 8px; }
+.admin-provider dd { margin: 0; font-size: 11px; }
+.admin-provider dd[data-ready="true"] { color: var(--green); }
+.admin-provider dd[data-ready="false"] { color: var(--amber); }
+.admin-section-title { padding: 8px 2px 0; }
+.admin-order-grid { grid-template-columns: 1.2fr .7fr .7fr .8fr .6fr 1.25fr; }
+.admin-order-actions { display: flex !important; grid-template-columns: none !important; gap: 6px !important; }
+.admin-order-actions button { white-space: nowrap; }
 
 .legal-shell { min-height: 100vh; padding: 24px clamp(18px, 5vw, 72px) 70px; color: var(--text); background: var(--bg); }
 .legal-shell nav { max-width: 900px; margin: 0 auto 45px; display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
@@ -494,7 +520,9 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid 
   .finding-row textarea { grid-column: 1 / -1; }
   .intelligence-card.wide, .distribution-hero, .distribution-progress.large, .source-evidence { grid-column: 1; }
   .fulfillment-prepare, .directory-queue { grid-column: 1; }
-  .fulfillment-prepare { grid-template-columns: 28px 1fr; }
+  .fulfillment-prepare { grid-template-columns: 28px 1fr; align-items: start; }
+  .distribution-intake-fields { grid-column: 1 / -1; grid-template-columns: 1fr; }
+  .distribution-intake-fields label { grid-column: 1; }
   .fulfillment-prepare button { grid-column: 2; justify-self: start; }
   .directory-row { grid-template-columns: 1fr auto; }
   .directory-row p { grid-column: 1 / -1; }
@@ -524,4 +552,7 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid 
   .admin-metrics article:nth-child(2) { border-right: 0; }
   .admin-table { overflow-x: auto; }
   .admin-table-head, .admin-table-row { min-width: 720px; }
+  .admin-provider { grid-template-columns: 1fr; }
+  .admin-provider dl { grid-column: auto; grid-template-columns: 1fr 1fr; }
+  .admin-order-grid { min-width: 920px; }
 }

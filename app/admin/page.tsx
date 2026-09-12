@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getFirebaseAdminDb, isFirebaseAdminExplicitlyConfigured } from "@/lib/firebase/admin";
 import { requireInternalAdmin } from "@/lib/internal-admin";
 import AdminQueue, { type AdminJob } from "./admin-queue";
+import { AdminOrders, ProviderPreflightPanel, type AdminOrder } from "./admin-operations";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,8 @@ export default async function AdminPage() {
   if (!isFirebaseAdminExplicitlyConfigured()) return <main className="admin-shell"><h1>Admin setup required</h1><p>Configure the server-controlled Firebase Admin credential before using the fulfillment queue.</p></main>;
   const db = getFirebaseAdminDb();
   const [jobSnapshot, orderSnapshot] = await Promise.all([db.collectionGroup("jobs").limit(100).get(), db.collectionGroup("orders").limit(100).get()]);
-  const projectRefs = [...new Map(jobSnapshot.docs.flatMap((job) => {
-    const project = job.ref.parent.parent;
+  const projectRefs = [...new Map([...jobSnapshot.docs, ...orderSnapshot.docs].flatMap((record) => {
+    const project = record.ref.parent.parent;
     return project ? [[project.path, project] as const] : [];
   })).values()];
   const projectSnapshots = projectRefs.length ? await db.getAll(...projectRefs) : [];
@@ -27,5 +28,12 @@ export default async function AdminPage() {
     return [{ workspaceId: workspace.id, projectId: project.id, projectName: names.get(project.path) ?? project.id, id: snapshot.id, type: String(data.type ?? "unknown"), status: String(data.status ?? "unknown"), attempts: Number(data.attempts ?? 0), lastError: data.lastError ? String(data.lastError) : undefined }];
   });
   const orderCounts = orderSnapshot.docs.reduce((counts, order) => { const status = String(order.data().status ?? "unknown"); counts[status] = (counts[status] ?? 0) + 1; return counts; }, {} as Record<string, number>);
-  return <main className="admin-shell"><header><span>Launch Auth internal</span><h1>Fulfillment operations</h1><p>Server-controlled queue, payment state, retries, and audit history.</p></header><div className="admin-metrics"><article><strong>{jobs.length}</strong><span>Total jobs</span></article><article><strong>{jobs.filter((job) => job.status === "queued").length}</strong><span>Queued</span></article><article><strong>{jobs.filter((job) => job.status === "failed").length}</strong><span>Failed</span></article><article><strong>{orderCounts.paid ?? 0}</strong><span>Paid orders</span></article></div><AdminQueue initialJobs={jobs} /></main>;
+  const orders: AdminOrder[] = orderSnapshot.docs.flatMap((snapshot) => {
+    const project = snapshot.ref.parent.parent;
+    const workspace = project?.parent.parent;
+    if (!project || !workspace) return [];
+    const data = snapshot.data();
+    return [{ workspaceId: workspace.id, projectId: project.id, projectName: names.get(project.path) ?? project.id, status: String(data.status ?? "unknown"), billingStatus: String(data.billingStatus ?? "unknown"), packageId: data.packageId ?? data.selectedPackageId, externalId: data.externalId ? String(data.externalId) : undefined, paymentIntentId: data.stripePaymentIntentId ? String(data.stripePaymentIntentId) : undefined, amountTotal: Number.isSafeInteger(data.amountTotal) ? data.amountTotal : undefined, refundedAmountCents: Number.isSafeInteger(data.refundedAmountCents) ? data.refundedAmountCents : undefined }];
+  });
+  return <main className="admin-shell"><header><span>Launch Auth internal</span><h1>Fulfillment operations</h1><p>Server-controlled queue, payment state, retries, and audit history.</p></header><div className="admin-metrics"><article><strong>{jobs.length}</strong><span>Total jobs</span></article><article><strong>{jobs.filter((job) => job.status === "queued").length}</strong><span>Queued</span></article><article><strong>{jobs.filter((job) => job.status === "failed").length}</strong><span>Failed</span></article><article><strong>{orderCounts.paid ?? 0}</strong><span>Paid orders</span></article></div><ProviderPreflightPanel /><AdminOrders initialOrders={orders} /><section className="admin-section-title"><span>Background work</span><h2>Fulfillment queue</h2></section><AdminQueue initialJobs={jobs} /></main>;
 }

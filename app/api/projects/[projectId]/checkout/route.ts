@@ -8,6 +8,7 @@ import { campaignDigest } from "@/lib/campaign-approval";
 import { getStripeClient, getStripePriceId, isStripeLiveMode } from "@/lib/stripe";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
 import { assertSameOrigin } from "@/lib/request-security";
+import { assertCheckoutReadiness } from "@/lib/readiness";
 
 const bodySchema = z.object({ packageId: z.enum(["launch", "authority", "authority_plus"]) });
 
@@ -28,7 +29,11 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     const adminDb = getFirebaseAdminDb();
     const fulfillment = await loadFulfillmentState(adminDb, user.uid, projectId);
     if (!fulfillment.order || fulfillment.order.status !== "awaiting_payment") throw new Error("Prepare an eligible fulfillment order before checkout.");
+    if (fulfillment.order.selectedPackageId !== packageId) throw new Error("Checkout must use the package and supplier quote selected during fulfillment preparation.");
     if (fulfillment.order.nonBillable && isStripeLiveMode()) throw new Error("Live checkout is disabled while the provider order is non-billable sandbox fulfillment.");
+    const livemode = isStripeLiveMode();
+    assertCheckoutReadiness(livemode);
+    if (!livemode && (!fulfillment.order.sandbox || !fulfillment.order.nonBillable)) throw new Error("Test checkout is disabled for live supplier orders. Prepare a sandbox order for test payments.");
     if (project.campaign.version !== fulfillment.order.campaignVersion
       || campaignDigest(project.campaign) !== fulfillment.order.campaignDigest) {
       throw new Error("The campaign changed after fulfillment was prepared. Prepare a new approved order before checkout.");
@@ -38,6 +43,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     if (fulfillment.order.stripeCheckoutSessionId) {
       if (fulfillment.order.expectedPackageId !== packageId) throw new Error("A checkout session for another package is already active.");
       const existing = await stripe.checkout.sessions.retrieve(fulfillment.order.stripeCheckoutSessionId);
+      if (existing.livemode !== livemode) throw new Error("The checkout session mode does not match the configured Stripe environment.");
       if (existing.status === "open" && existing.url) return NextResponse.json({ url: existing.url });
       if (existing.status === "complete") throw new Error("Payment is already being processed for this order.");
       checkoutAttempt = await clearExpiredCheckoutSession(adminDb, user.uid, projectId, existing.id);
@@ -45,6 +51,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
     const priceId = getStripePriceId(packageId);
     const price = await stripe.prices.retrieve(priceId);
+    if (price.livemode !== livemode) throw new Error("The Stripe price mode does not match the configured environment.");
     if (!price.active || price.type !== "one_time" || price.unit_amount == null) throw new Error("The selected Stripe price is not an active one-time package.");
     if (price.currency !== fulfillment.order.currency) throw new Error("The selected Stripe price currency does not match the fulfillment order.");
     const metadata = { uid: user.uid, projectId, packageId, priceId, checkoutAttempt: String(checkoutAttempt) };
@@ -61,6 +68,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       cancel_url: `${origin}/?checkout=canceled&project=${projectId}`,
     }, { idempotencyKey: `checkout_${user.uid}_${projectId}_${checkoutAttempt}_${packageId}` });
     if (!session.url) throw new Error("Stripe did not return a checkout URL.");
+    if (session.livemode !== livemode) throw new Error("The checkout session mode does not match the configured Stripe environment.");
     await bindCheckoutSession(adminDb, {
       uid: user.uid,
       projectId,
@@ -70,6 +78,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       amountSubtotal: price.unit_amount,
       currency: price.currency,
       checkoutAttempt,
+      livemode: session.livemode,
     });
     return NextResponse.json({ url: session.url });
   } catch (error) {

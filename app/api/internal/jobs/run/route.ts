@@ -17,7 +17,7 @@ function authorized(request: Request) {
 export async function POST(request: Request) {
   if (!authorized(request)) return NextResponse.json({ error: "Not found." }, { status: 404 });
   try {
-    const result = await runQueuedFulfillmentJobs(getFirebaseAdminDb(), getDistributionProvider(), getTransactionalEmailProvider());
+    const result = await runQueuedFulfillmentJobs(getFirebaseAdminDb(), getDistributionProvider, getTransactionalEmailProvider());
     return NextResponse.json(result, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Job processing failed.";

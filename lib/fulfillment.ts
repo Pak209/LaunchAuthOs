@@ -1,8 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import type { CampaignDraft, DirectorySubmission, FulfillmentState, JobRun, Placement, ProviderOrder } from "./types";
-import type { ProviderQuote } from "./provider";
-import type { DistributionProvider } from "./provider";
+import { ProviderSubmissionNeedsReviewError, type DistributionDetails, type DistributionProvider, type ProviderPackageId, type ProviderQuote } from "./provider";
 import { isTransactionalEmailConfigured, type TransactionalEmailProvider } from "./email";
 import { assertCampaignAttestation, campaignDigest, type CampaignApprovalAttestation } from "./campaign-approval";
 import { verifyPublicPlacementUrl } from "./placement-verification";
@@ -10,6 +9,7 @@ import { verifyPublicPlacementUrl } from "./placement-verification";
 type PaidPackageId = "launch" | "authority" | "authority_plus";
 
 export type CheckoutBinding = {
+  livemode: boolean;
   uid: string;
   projectId: string;
   sessionId: string;
@@ -28,6 +28,7 @@ export type PaidCheckout = CheckoutBinding & {
 };
 
 export type RefundedPayment = {
+  livemode: boolean;
   paymentIntentId: string;
   eventId: string;
   amount: number;
@@ -38,6 +39,22 @@ export type RefundedPayment = {
 
 const JOB_LEASE_MS = 10 * 60 * 1_000;
 const VERIFICATION_POLL_MS = 60 * 60 * 1_000;
+
+export type DistributionProviderResolver = (providerId: string) => DistributionProvider;
+
+export function assertJobCanRetry(job: Pick<JobRun, "status" | "type" | "dispatchStartedAt" | "needsHumanReview">) {
+  if (job.status !== "failed") throw new Error("Only failed jobs can be retried.");
+  if (job.needsHumanReview || (job.type === "provider_submission" && job.dispatchStartedAt)) {
+    throw new Error("This job requires supplier reconciliation before retry. A release may already have been submitted.");
+  }
+}
+
+function providerForOrder(resolveProvider: DistributionProviderResolver, order: ProviderOrder) {
+  if (!order.provider) throw new Error("The order is missing its provider identity.");
+  const provider = resolveProvider(order.provider);
+  if (provider.id !== order.provider) throw new Error("The provider does not match the order.");
+  return provider;
+}
 
 export function isJobLeaseExpired(job: Pick<JobRun, "status" | "leaseExpiresAt">, now = Date.now()) {
   const expiresAt = job.leaseExpiresAt ? Date.parse(job.leaseExpiresAt) : Number.NaN;
@@ -51,6 +68,26 @@ export function nextProviderOrderStatus(current: ProviderOrder["status"], observ
   return (rank[current] ?? 0) > (rank[observed] ?? 0) ? current : observed;
 }
 
+function plainWords(value: string) {
+  return value.replace(/<[^>]+>/g, " ").replace(/[#*_`>\[\]()]/g, " ").split(/\s+/).filter(Boolean);
+}
+
+export function providerReleaseFromCampaign(campaign: CampaignDraft) {
+  const asset = campaign.assets.find((candidate) => candidate.type === "press_release");
+  if (!asset || asset.status !== "approved") throw new Error("Approve the press release before preparing fulfillment.");
+  const firstLine = asset.content.split(/\r?\n/).map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean) ?? "";
+  const title = plainWords(asset.title).length >= 5 ? asset.title.trim() : firstLine;
+  if (title.length < 5 || title.length > 200 || plainWords(title).length < 5) {
+    throw new Error("The press release headline must contain at least five words and no more than 200 characters.");
+  }
+  const words = plainWords(asset.content);
+  if (words.length < 250 || words.length > 1_150) throw new Error("The approved press release must contain 250–1,150 words before fulfillment so the required media-contact block remains within the provider limit.");
+  const summaryWords = plainWords(asset.content.replace(/https?:\/\/\S+/g, " ")).slice(0, 45);
+  let summary = summaryWords.join(" ");
+  if (summary.length > 250) summary = summary.slice(0, 250).replace(/\s+\S*$/, "").trim();
+  return { title, content: asset.content, summary };
+}
+
 function clearLease() {
   return { runToken: FieldValue.delete(), leaseExpiresAt: FieldValue.delete() };
 }
@@ -60,6 +97,7 @@ async function claimQueuedJob(db: Firestore, jobRef: FirebaseFirestore.DocumentR
     const snapshot = await transaction.get(jobRef);
     if (!snapshot.exists || snapshot.data()?.status !== "queued") return null;
     const data = snapshot.data() as JobRun;
+    if (data.needsHumanReview || (data.type === "provider_submission" && data.dispatchStartedAt)) return null;
     if (data.nextAttemptAt && Date.parse(data.nextAttemptAt) > Date.now()) return null;
     const attempts = Number(data.attempts ?? 0) + 1;
     const runToken = randomUUID();
@@ -88,19 +126,49 @@ async function failClaimedJob(
     const snapshot = await transaction.get(jobRef);
     const current = snapshot.data() as JobRun | undefined;
     if (!snapshot.exists || current?.status !== "running" || current.runToken !== runToken) return { processed: false };
+    // A failed commit acknowledgement can hide a successfully persisted fence.
+    const uncertain = current.type === "provider_submission" && Boolean(current.dispatchStartedAt);
+    const project = jobRef.parent.parent;
+    const orderRef = project?.collection("orders").doc("current");
+    const orderSnapshot = uncertain && orderRef ? await transaction.get(orderRef) : undefined;
     const failureCount = Number(current.failureCount ?? 0) + 1;
-    const failed = failureCount >= 3;
+    const failed = uncertain || failureCount >= 3;
     const now = Date.now();
     transaction.update(jobRef, {
       status: failed ? "failed" : "scheduled",
       failureCount,
       lastError,
+      ...(uncertain ? { needsHumanReview: true } : {}),
       nextAttemptAt: failed ? FieldValue.delete() : new Date(now + Math.min(15 * 60_000, 30_000 * 2 ** (failureCount - 1))).toISOString(),
       ...clearLease(),
       updatedAt: new Date(now).toISOString(),
       updatedAtServer: FieldValue.serverTimestamp(),
     });
+    if (uncertain && orderRef && orderSnapshot?.exists) {
+      transaction.update(orderRef, { providerSubmissionUncertain: true, updatedAt: new Date(now).toISOString(), updatedAtServer: FieldValue.serverTimestamp() });
+      transaction.create(project!.collection("auditLogs").doc(), { action: "provider.submission_uncertain", targetId: jobRef.id, reason: "dispatch_commit_acknowledgement_lost", createdAt: FieldValue.serverTimestamp() });
+    }
     return { processed: true, status: failed ? "failed" as const : "queued" as const, error: lastError };
+  });
+}
+
+async function flagProviderSubmissionForReview(
+  db: Firestore,
+  jobRef: FirebaseFirestore.DocumentReference,
+  orderRef: FirebaseFirestore.DocumentReference,
+  projectRef: FirebaseFirestore.DocumentReference,
+  runToken: string,
+  error: ProviderSubmissionNeedsReviewError,
+) {
+  const lastError = error.message.slice(0, 500);
+  return db.runTransaction(async (transaction) => {
+    const current = await transaction.get(jobRef);
+    if (!current.exists || current.data()?.status !== "running" || current.data()?.runToken !== runToken) return { processed: false };
+    const now = new Date().toISOString();
+    transaction.update(jobRef, { status: "failed", lastError, needsHumanReview: true, ...clearLease(), updatedAt: now, updatedAtServer: FieldValue.serverTimestamp() });
+    transaction.update(orderRef, { providerSubmissionUncertain: true, updatedAt: now, updatedAtServer: FieldValue.serverTimestamp() });
+    transaction.create(projectRef.collection("auditLogs").doc(), { action: "provider.submission_uncertain", targetId: jobRef.id, lastError, createdAt: FieldValue.serverTimestamp() });
+    return { processed: true, status: "failed" as const, error: lastError, needsHumanReview: true };
   });
 }
 
@@ -112,14 +180,24 @@ async function recoverExpiredJobLeases(db: Firestore, limit = 25) {
       const currentSnapshot = await transaction.get(job.ref);
       const current = currentSnapshot.data() as JobRun | undefined;
       if (!currentSnapshot.exists || !current || !isJobLeaseExpired(current)) return false;
+      const uncertain = current.type === "provider_submission"
+        && (Boolean(current.dispatchStartedAt) || current.dispatchProtocolVersion !== 1);
+      const project = job.ref.parent.parent;
+      const orderRef = project?.collection("orders").doc("current");
+      const orderSnapshot = uncertain && orderRef ? await transaction.get(orderRef) : undefined;
       transaction.update(job.ref, {
-        status: "queued",
-        nextAttemptAt: new Date().toISOString(),
-        lastError: "Recovered after the previous worker lease expired.",
+        status: uncertain ? "failed" : "queued",
+        needsHumanReview: uncertain,
+        nextAttemptAt: uncertain ? FieldValue.delete() : new Date().toISOString(),
+        lastError: uncertain ? "Worker lease expired during a possible supplier submission. Reconcile the supplier dashboard before retrying." : "Recovered after the previous worker lease expired before dispatch.",
         ...clearLease(),
         updatedAt: new Date().toISOString(),
         updatedAtServer: FieldValue.serverTimestamp(),
       });
+      if (uncertain && orderRef && orderSnapshot?.exists) {
+        transaction.update(orderRef, { providerSubmissionUncertain: true, updatedAt: new Date().toISOString(), updatedAtServer: FieldValue.serverTimestamp() });
+        transaction.create(project!.collection("auditLogs").doc(), { action: "provider.submission_uncertain", targetId: job.id, reason: "expired_dispatch_lease", createdAt: FieldValue.serverTimestamp() });
+      }
       return true;
     });
     if (didRecover) recovered += 1;
@@ -134,7 +212,7 @@ async function promoteDueScheduledJobs(db: Firestore, limit = 100) {
     const didPromote = await db.runTransaction(async (transaction) => {
       const currentSnapshot = await transaction.get(job.ref);
       const current = currentSnapshot.data() as JobRun | undefined;
-      if (!currentSnapshot.exists || current?.status !== "scheduled") return false;
+      if (!currentSnapshot.exists || current?.status !== "scheduled" || current.needsHumanReview) return false;
       if (current.nextAttemptAt && Date.parse(current.nextAttemptAt) > Date.now()) return false;
       transaction.update(job.ref, {
         status: "queued",
@@ -177,8 +255,11 @@ export async function prepareFulfillment(
   projectId: string,
   campaign: CampaignDraft,
   quote: ProviderQuote,
+  distributionDetails: DistributionDetails,
+  selectedPackageId: ProviderPackageId,
 ): Promise<FulfillmentState> {
   if (campaign.status !== "approved") throw new Error("Approve the complete campaign before preparing fulfillment.");
+  const release = providerReleaseFromCampaign(campaign);
   const { project, order, directories, jobs } = paths(db, uid, projectId);
   const approval = project.collection("campaignApprovals").doc("current");
   const now = new Date().toISOString();
@@ -189,9 +270,23 @@ export async function prepareFulfillment(
     if (!projectSnapshot.exists || projectSnapshot.data()?.createdBy !== uid) throw new Error("The project was not found.");
     assertCampaignAttestation(campaign, approvalSnapshot.data() as CampaignApprovalAttestation | undefined, uid);
     if (orderSnapshot.exists) return;
+    const profile = projectSnapshot.data()?.profile;
+    const company = String(profile?.company ?? "").trim();
+    const website = String(profile?.sourceUrl ?? "").trim();
+    if (!company || !/^https?:\/\//.test(website)) throw new Error("The project needs a company name and website before fulfillment.");
+    if (!quote.sandbox && (!quote.providerPlan || !Number.isSafeInteger(quote.requiredCredits) || Number(quote.requiredCredits) <= 0)) throw new Error("The provider quote needs an exact plan and credit requirement.");
+    const idempotencyKey = createHash("sha256").update(`${uid}:${projectId}:${campaign.version}:provider-submit`).digest("hex");
+    const submissionInput = {
+      ...release, ...distributionDetails, company, website, campaignVersion: campaign.version,
+      packageId: selectedPackageId, idempotencyKey,
+      ...(quote.providerPlan ? { providerPlan: quote.providerPlan } : {}),
+    };
     const providerOrder: ProviderOrder = {
       id: "current", provider: quote.provider, sandbox: quote.sandbox, nonBillable: quote.nonBillable,
-      providerCostCents: quote.providerCostCents, currency: quote.currency,
+      providerCostCents: quote.providerCostCents, currency: quote.currency, distributionDetails, selectedPackageId,
+      submissionInput,
+      ...(quote.providerPlan ? { providerPlan: quote.providerPlan } : {}),
+      ...(quote.requiredCredits != null ? { requiredCredits: quote.requiredCredits } : {}),
       campaignVersion: campaign.version, campaignDigest: campaignDigest(campaign), checkoutAttempt: 0,
       status: "awaiting_payment", billingStatus: "awaiting_payment", createdAt: now, updatedAt: now,
     };
@@ -202,7 +297,7 @@ export async function prepareFulfillment(
     }
     const job: JobRun = {
       id: "provider_submission_current", type: "provider_submission", status: "blocked", attempts: 0,
-      idempotencyKey: createHash("sha256").update(`${uid}:${projectId}:${campaign.version}:provider-submit`).digest("hex"),
+      idempotencyKey, dispatchProtocolVersion: 1,
       blockedReason: "payment_required", createdAt: now, updatedAt: now,
     };
     transaction.create(jobs.doc(job.id), { ...job, createdAtServer: FieldValue.serverTimestamp(), updatedAtServer: FieldValue.serverTimestamp() });
@@ -230,6 +325,7 @@ export async function bindCheckoutSession(db: Firestore, input: CheckoutBinding)
       expectedPriceId: input.priceId,
       expectedAmountSubtotal: input.amountSubtotal,
       expectedCurrency: input.currency.toLowerCase(),
+      expectedStripeLivemode: input.livemode,
       updatedAt: new Date().toISOString(),
       updatedAtServer: FieldValue.serverTimestamp(),
     });
@@ -255,6 +351,7 @@ export async function clearExpiredCheckoutSession(db: Firestore, uid: string, pr
       expectedPriceId: FieldValue.delete(),
       expectedAmountSubtotal: FieldValue.delete(),
       expectedCurrency: FieldValue.delete(),
+      expectedStripeLivemode: FieldValue.delete(),
       updatedAt: new Date().toISOString(),
       updatedAtServer: FieldValue.serverTimestamp(),
     });
@@ -269,10 +366,14 @@ export function assertPaidCheckoutMatchesOrder(order: ProviderOrder, input: Paid
   if (!validPackage
     || !/^price_[A-Za-z0-9]+$/.test(input.priceId)
     || !validAmounts
+    || typeof input.livemode !== "boolean"
+    || order.expectedStripeLivemode !== input.livemode
+    || (input.livemode ? (order.sandbox || order.nonBillable) : (!order.sandbox || !order.nonBillable))
     || !/^[a-z]{3}$/.test(input.currency)
     || order.status !== "awaiting_payment"
     || (order.checkoutAttempt ?? 0) !== input.checkoutAttempt
     || order.stripeCheckoutSessionId !== input.sessionId
+    || order.selectedPackageId !== input.packageId
     || order.expectedPackageId !== input.packageId
     || order.expectedPriceId !== input.priceId
     || order.expectedAmountSubtotal !== input.amountSubtotal
@@ -300,6 +401,7 @@ export async function markCheckoutPaid(
     transaction.create(eventRef, { type: "checkout.session.completed", processedAt: FieldValue.serverTimestamp() });
     transaction.update(order, {
       status: "paid", billingStatus: "paid", stripeCheckoutSessionId: input.sessionId, stripePaymentIntentId: input.paymentIntentId,
+      stripeLivemode: input.livemode,
       packageId: input.packageId, amountSubtotal: input.amountSubtotal, amountTotal: input.amountTotal,
       currency: input.currency, customerEmail: input.customerEmail ?? null, updatedAt: now, updatedAtServer: FieldValue.serverTimestamp(),
     });
@@ -325,6 +427,8 @@ export function assertRefundMatchesOrder(order: ProviderOrder, input: RefundedPa
     || input.amountRefunded > input.amount
     || !/^[a-z]{3}$/.test(input.currency)
     || order.stripePaymentIntentId !== input.paymentIntentId
+    || typeof input.livemode !== "boolean"
+    || order.stripeLivemode !== input.livemode
     || order.currency !== input.currency
     || (order.amountTotal != null && order.amountTotal !== input.amount)
     || input.fullyRefunded !== (input.amountRefunded === input.amount)) {
@@ -346,9 +450,11 @@ export async function markPaymentIntentRefunded(db: Firestore, input: RefundedPa
     if (!orderSnapshot.exists) throw new Error("The refunded payment could not be matched to an order.");
     const orderData = orderSnapshot.data() as ProviderOrder;
     assertRefundMatchesOrder(orderData, input);
-    const billingStatus = input.fullyRefunded ? "refunded" : "partially_refunded";
-    const fulfillmentStatus = input.fullyRefunded && orderData.status === "paid" ? "refunded" : orderData.status;
     transaction.create(eventRef, { type: "charge.refunded", amountRefunded: input.amountRefunded, currency: input.currency, processedAt: FieldValue.serverTimestamp() });
+    // Stripe can deliver cumulative refund observations out of order.
+    if (input.amountRefunded <= (orderData.refundedAmountCents ?? 0)) return;
+    const billingStatus = input.fullyRefunded ? "refunded" : "partially_refunded";
+    const fulfillmentStatus = input.fullyRefunded && orderData.status === "paid" && !orderData.providerSubmissionStartedAt ? "refunded" : orderData.status;
     transaction.update(order.ref, {
       status: fulfillmentStatus,
       billingStatus,
@@ -367,32 +473,67 @@ export async function markPaymentIntentRefunded(db: Firestore, input: RefundedPa
   });
 }
 
-async function runProviderSubmission(db: Firestore, jobRef: FirebaseFirestore.DocumentReference, provider: DistributionProvider) {
+async function runProviderSubmission(db: Firestore, jobRef: FirebaseFirestore.DocumentReference, resolveProvider: DistributionProviderResolver) {
   const project = jobRef.parent.parent;
   if (!project) throw new Error("The job has no project.");
   const order = project.collection("orders").doc("current");
   const campaign = project.collection("campaigns").doc("current");
   const claimed = await claimQueuedJob(db, jobRef);
   if (!claimed) return { processed: false };
+  let dispatchStarted = false;
   try {
-    const [orderSnapshot, campaignSnapshot, projectSnapshot] = await Promise.all([order.get(), campaign.get(), project.get()]);
+    const [orderSnapshot, campaignSnapshot] = await Promise.all([order.get(), campaign.get()]);
     if (!orderSnapshot.exists || orderSnapshot.data()?.status !== "paid") throw new Error("The provider job has no paid order.");
     if (!campaignSnapshot.exists || !campaignSnapshot.data()?.version) throw new Error("The provider job has no campaign version.");
-    if (!projectSnapshot.exists) throw new Error("The provider job has no project.");
     const orderData = orderSnapshot.data() as ProviderOrder;
+    const provider = providerForOrder(resolveProvider, orderData);
+    if ((!orderData.sandbox || !orderData.nonBillable) && orderData.stripeLivemode !== true) throw new Error("Live supplier submission requires a verified live-mode payment.");
+    if ((orderData.sandbox || orderData.nonBillable) && orderData.stripeLivemode !== false) throw new Error("Sandbox fulfillment requires a verified test-mode payment.");
     const campaignData = campaignSnapshot.data() as CampaignDraft;
     if (campaignData.status !== "approved"
       || campaignData.version !== orderData.campaignVersion
       || campaignDigest(campaignData) !== orderData.campaignDigest) {
       throw new Error("The approved campaign changed after fulfillment was prepared.");
     }
-    const submission = await provider.submit({ campaignVersion: campaignData.version, idempotencyKey: claimed.data.idempotencyKey });
+    if (!orderData.distributionDetails || !orderData.selectedPackageId) throw new Error("The provider order is missing its package, distribution location, or categories.");
+    const input = orderData.submissionInput;
+    if (!input || input.campaignVersion !== orderData.campaignVersion || input.packageId !== orderData.selectedPackageId || input.idempotencyKey !== claimed.data.idempotencyKey || input.providerPlan !== orderData.providerPlan) {
+      throw new Error("The order is missing its frozen submission details. Reconcile the order before fulfillment.");
+    }
+    provider.assertCanSubmit(input);
+    // Persist the dispatch fence BEFORE contacting the supplier. A restarted worker
+    // cannot know whether a request was accepted, so it must not resubmit it.
+    const fenced = await db.runTransaction(async (transaction) => {
+      const [jobSnapshot, freshOrderSnapshot] = await Promise.all([transaction.get(jobRef), transaction.get(order)]);
+      const job = jobSnapshot.data() as JobRun | undefined;
+      const freshOrder = freshOrderSnapshot.data() as ProviderOrder | undefined;
+      if (!job || job.status !== "running" || job.runToken !== claimed.runToken) return false;
+      if (job.dispatchStartedAt || job.needsHumanReview || freshOrder?.providerSubmissionStartedAt || freshOrder?.providerSubmissionUncertain || freshOrder?.externalId) {
+        throw new ProviderSubmissionNeedsReviewError("A supplier submission may already exist. Reconcile the order before retrying.");
+      }
+      if (freshOrder?.status !== "paid" || freshOrder.billingStatus === "refunded") throw new Error("The order is no longer eligible for submission.");
+      const startedAt = new Date().toISOString();
+      transaction.update(jobRef, { dispatchStartedAt: startedAt, dispatchProtocolVersion: 1, updatedAt: startedAt });
+      transaction.update(order, { providerSubmissionStartedAt: startedAt, updatedAt: startedAt });
+      return true;
+    });
+    if (!fenced) return { processed: false };
+    dispatchStarted = true;
+    const submission = await provider.submit(input);
     const now = new Date().toISOString();
     await db.runTransaction(async (transaction) => {
       const currentJob = await transaction.get(jobRef);
       if (!currentJob.exists || currentJob.data()?.status !== "running" || currentJob.data()?.runToken !== claimed.runToken) return;
       transaction.update(jobRef, { status: "complete", failureCount: 0, lastError: FieldValue.delete(), ...clearLease(), updatedAt: now, updatedAtServer: FieldValue.serverTimestamp() });
-      transaction.update(order, { status: submission.status, externalId: submission.externalId, updatedAt: now, updatedAtServer: FieldValue.serverTimestamp() });
+      transaction.update(order, {
+        status: submission.status,
+        externalId: submission.externalId,
+        providerStatusReason: submission.statusReason ?? null,
+        providerPackageOutcomes: submission.packageOutcomes ?? [],
+        providerSubmissionUncertain: false,
+        updatedAt: now,
+        updatedAtServer: FieldValue.serverTimestamp(),
+      });
       transaction.update(project, { lifecycleStatus: "fulfillment", campaignStatus: "fulfillment", updatedAtIso: now, updatedAt: FieldValue.serverTimestamp() });
       transaction.create(project.collection("auditLogs").doc(), { action: "provider.submitted", targetId: submission.externalId, jobId: jobRef.id, createdAt: FieldValue.serverTimestamp() });
       const verificationJob = project.collection("jobs").doc("placement_verification_current");
@@ -411,6 +552,10 @@ async function runProviderSubmission(db: Firestore, jobRef: FirebaseFirestore.Do
     });
     return { processed: true, status: "complete" as const };
   } catch (error) {
+    if (dispatchStarted || error instanceof ProviderSubmissionNeedsReviewError) {
+      const uncertain = error instanceof ProviderSubmissionNeedsReviewError ? error : new ProviderSubmissionNeedsReviewError(`Submission outcome needs reconciliation: ${error instanceof Error ? error.message : "unknown failure"}`);
+      return flagProviderSubmissionForReview(db, jobRef, order, project, claimed.runToken, uncertain);
+    }
     return failClaimedJob(db, jobRef, claimed.runToken, error);
   }
 }
@@ -432,7 +577,7 @@ async function runCustomerEmail(db: Firestore, jobRef: FirebaseFirestore.Documen
   }
 }
 
-async function runPlacementVerification(db: Firestore, jobRef: FirebaseFirestore.DocumentReference, provider: DistributionProvider) {
+async function runPlacementVerification(db: Firestore, jobRef: FirebaseFirestore.DocumentReference, resolveProvider: DistributionProviderResolver) {
   const project = jobRef.parent.parent;
   if (!project) throw new Error("The verification job has no project.");
   const orderRef = project.collection("orders").doc("current");
@@ -443,6 +588,7 @@ async function runPlacementVerification(db: Firestore, jobRef: FirebaseFirestore
     const [orderSnapshot, existingSnapshot] = await Promise.all([orderRef.get(), placementsRef.limit(100).get()]);
     const order = orderSnapshot.data() as ProviderOrder | undefined;
     if (!orderSnapshot.exists || !order?.externalId) throw new Error("The verification job has no submitted provider order.");
+    const provider = providerForOrder(resolveProvider, order);
     const [providerStatus, evidence] = await Promise.all([provider.status(order.externalId), provider.evidence(order.externalId)]);
     const existingByUrl = new Map(existingSnapshot.docs.map((snapshot) => [String(snapshot.data().url), { id: snapshot.id, data: snapshot.data() as Placement }]));
     const evidenceByUrl = new Map(evidence.slice(0, 100).map((item) => [item.url, item]));
@@ -494,7 +640,13 @@ async function runPlacementVerification(db: Firestore, jobRef: FirebaseFirestore
           }, { merge: true });
         }
       }
-      transaction.update(orderRef, { status: nextProviderOrderStatus(order.status, providerStatus.status), updatedAt: now, updatedAtServer: FieldValue.serverTimestamp() });
+      transaction.update(orderRef, {
+        status: nextProviderOrderStatus(order.status, providerStatus.status),
+        providerStatusReason: providerStatus.statusReason ?? null,
+        providerPackageOutcomes: providerStatus.packageOutcomes ?? [],
+        updatedAt: now,
+        updatedAtServer: FieldValue.serverTimestamp(),
+      });
       const terminal = providerStatus.status === "failed" || providerStatus.status === "canceled";
       transaction.update(jobRef, {
         status: terminal ? "complete" : "scheduled",
@@ -520,16 +672,16 @@ async function runPlacementVerification(db: Firestore, jobRef: FirebaseFirestore
   }
 }
 
-export async function runQueuedFulfillmentJobs(db: Firestore, provider: DistributionProvider, emailProvider: TransactionalEmailProvider, limit = 10) {
+export async function runQueuedFulfillmentJobs(db: Firestore, resolveProvider: DistributionProviderResolver, emailProvider: TransactionalEmailProvider, limit = 10) {
   const recovered = await recoverExpiredJobLeases(db);
   const promoted = await promoteDueScheduledJobs(db);
   const snapshot = await db.collectionGroup("jobs").where("status", "==", "queued").limit(Math.min(Math.max(limit, 1), 25)).get();
   const results = [];
   for (const job of snapshot.docs) {
     const type = job.data().type;
-    if (type === "provider_submission") results.push(await runProviderSubmission(db, job.ref, provider));
+    if (type === "provider_submission") results.push(await runProviderSubmission(db, job.ref, resolveProvider));
     if (type === "customer_email") results.push(await runCustomerEmail(db, job.ref, emailProvider));
-    if (type === "placement_verification") results.push(await runPlacementVerification(db, job.ref, provider));
+    if (type === "placement_verification") results.push(await runPlacementVerification(db, job.ref, resolveProvider));
   }
   return { inspected: snapshot.size, recovered, promoted, processed: results.filter((result) => result.processed).length, results };
 }

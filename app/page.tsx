@@ -15,6 +15,7 @@ import {
 } from "./components";
 
 type View = "Command Center" | "Brand Intelligence" | "Campaign Studio" | "Distribution Center" | "Authority Graph" | "Reports" | "Packages";
+type DistributionDetails = { packageId: "launch" | "authority" | "authority_plus"; country: string; city: string; categories: string[]; contactName: string; contactEmail: string };
 
 const navItems: Array<{ label: View; icon: typeof SquaresFour }> = [
   { label: "Command Center", icon: SquaresFour },
@@ -237,7 +238,7 @@ function BrandIntelligence({ result, claims, editClaim, editProfile, editFinding
   );
 }
 
-function CampaignStudio({ result, claims, toggleClaim, approvable, status, approve, generate, editAsset, saveAssets, exportAssets, generationStatus }: { result: PersistedAnalysisResult | null; claims: Claim[]; toggleClaim: (id: string) => void; approvable: boolean; status: string; approve: () => void; generate: () => void; editAsset: (id: string, content: string) => void; saveAssets: (status: "draft" | "approved") => void; exportAssets: () => void; generationStatus: "idle" | "generating" | "saving" }) {
+function CampaignStudio({ result, claims, toggleClaim, approvable, status, approve, generate, editAsset, saveAssets, exportAssets, generationStatus }: { result: PersistedAnalysisResult | null; claims: Claim[]; toggleClaim: (id: string) => void; approvable: boolean; status: string; approve: () => void; generate: () => void; editAsset: (id: string, field: "title" | "content", value: string) => void; saveAssets: (status: "draft" | "approved") => void; exportAssets: () => void; generationStatus: "idle" | "generating" | "saving" }) {
   if (!result) return <EmptyIntelligence title="Campaign intelligence is waiting" body="Analyze a company first. Launch Auth will turn verified facts into a defensible campaign narrative." />;
   const campaign = result.campaign;
   const generated = Boolean(campaign);
@@ -255,7 +256,7 @@ function CampaignStudio({ result, claims, toggleClaim, approvable, status, appro
       </section>
       {campaign ? <section className="surface campaign-editor">
         <div className="surface-heading"><div><span>Campaign asset editor</span><small>Version {campaign.version} · {campaign.model} · generated {new Date(campaign.generatedAt).toLocaleString()}</small></div><EvidenceBadge state={campaign.status} tone={campaign.status === "approved" ? "positive" : "accent"} /></div>
-        <div className="campaign-editor-assets">{campaign.assets.map((asset) => <label key={asset.id}><span>{asset.title}<small>{asset.claimIds.length} approved evidence reference{asset.claimIds.length === 1 ? "" : "s"}</small></span><textarea value={asset.content} aria-label={`Edit ${asset.title}`} onChange={(event) => editAsset(asset.id, event.target.value)} /></label>)}</div>
+        <div className="campaign-editor-assets">{campaign.assets.map((asset) => <label key={asset.id}><span><input aria-label={`Edit ${asset.type} title`} value={asset.title} onChange={(event) => editAsset(asset.id, "title", event.target.value)} /><small>{asset.claimIds.length} approved evidence reference{asset.claimIds.length === 1 ? "" : "s"}{asset.type === "press_release" ? ` · ${asset.content.split(/\s+/).filter(Boolean).length} words` : ""}</small></span><textarea value={asset.content} aria-label={`Edit ${asset.title}`} onChange={(event) => editAsset(asset.id, "content", event.target.value)} /></label>)}</div>
         <div className="campaign-editor-actions"><button className="secondary-button" disabled={generationStatus !== "idle"} onClick={() => saveAssets("draft")}>Save new version</button><button className="primary-button" disabled={generationStatus !== "idle"} onClick={() => saveAssets("approved")}>Approve campaign</button><button className="secondary-button" onClick={exportAssets}>Download assets</button><button className="secondary-button" disabled={generationStatus !== "idle"} onClick={generate}>Regenerate</button></div>
       </section> : <div className="asset-grid">
         {["Press Release", "Headlines", "Founder Quotes", "Company Boilerplate", "Social Posts", "Directory Copy", "FAQ", "Structured Data"].map((asset, index) => <CampaignAsset key={asset} name={asset} icon={index === 0 ? FileText : index < 4 ? Megaphone : index < 6 ? PaperPlaneTilt : ListChecks} state="LOCKED" />)}
@@ -265,7 +266,13 @@ function CampaignStudio({ result, claims, toggleClaim, approvable, status, appro
   );
 }
 
-function DistributionCenter({ result, fulfillment, prepare, loading }: { result: PersistedAnalysisResult | null; fulfillment: FulfillmentState | null; prepare: () => void; loading: boolean }) {
+function DistributionCenter({ result, fulfillment, prepare, loading }: { result: PersistedAnalysisResult | null; fulfillment: FulfillmentState | null; prepare: (details: DistributionDetails) => void; loading: boolean }) {
+  const [country, setCountry] = useState("United States");
+  const [packageId, setPackageId] = useState<DistributionDetails["packageId"]>("launch");
+  const [city, setCity] = useState("");
+  const [categories, setCategories] = useState("Technology");
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
   if (!result) return <EmptyIntelligence title="Distribution has not started" body="Analyze your company and approve a campaign first. Submission counts and placement statuses will appear only after real fulfillment begins." />;
   const campaignApproved = result.campaign?.status === "approved";
   const directories = fulfillment?.directories ?? [];
@@ -286,7 +293,10 @@ function DistributionCenter({ result, fulfillment, prepare, loading }: { result:
           ["Authority monitoring", "NOT ACTIVE", "neutral"],
         ].map(([label, state, tone]) => <div className="timeline-row" key={label}><span className="timeline-icon"><Check size={13} /></span><strong>{label}</strong><EvidenceBadge state={state} tone={tone as "neutral" | "warning"} /></div>)}
       </section>
-      {!fulfillment?.order ? <section className="surface fulfillment-prepare"><ShieldCheck size={22} weight="duotone" /><div><strong>Prepare fulfillment safely</strong><p>This creates a non-billable provider sandbox quote, a payment-blocked durable job, and assisted directory tasks. Nothing is submitted externally.</p></div><button className="primary-button" disabled={!campaignApproved || loading} onClick={prepare}>{loading ? "Preparing…" : "Prepare fulfillment"}</button></section> : null}
+      {!fulfillment?.order ? <form className="surface fulfillment-prepare" onSubmit={(event) => {
+        event.preventDefault();
+        prepare({ packageId, country: country.trim(), city: city.trim(), categories: categories.split(",").map((value) => value.trim()).filter(Boolean), contactName: contactName.trim(), contactEmail: contactEmail.trim() });
+      }}><ShieldCheck size={22} weight="duotone" /><div className="fulfillment-copy"><strong>Prepare fulfillment safely</strong><p>Choose the customer package and confirm the dateline, categories, and authorized media contact. The supplier plan, cost, credits, and Stripe package become one immutable order.</p></div><div className="distribution-intake-fields"><label><span>Package</span><select value={packageId} onChange={(event) => setPackageId(event.target.value as DistributionDetails["packageId"])}><option value="launch">Launch</option><option value="authority">Authority</option><option value="authority_plus">Authority+</option></select></label><label><span>Country</span><input required minLength={2} maxLength={120} value={country} onChange={(event) => setCountry(event.target.value)} /></label><label><span>City</span><input required maxLength={120} placeholder="Dateline city" value={city} onChange={(event) => setCity(event.target.value)} /></label><label><span>Categories</span><input required placeholder="Technology, Business" value={categories} onChange={(event) => setCategories(event.target.value)} /></label><label><span>Media contact</span><input required minLength={2} maxLength={120} placeholder="Full name" value={contactName} onChange={(event) => setContactName(event.target.value)} /></label><label><span>Contact email</span><input required type="email" maxLength={254} placeholder="press@company.com" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} /></label></div><button className="primary-button" disabled={!campaignApproved || loading || !city.trim() || !categories.trim() || !contactName.trim() || !contactEmail.trim()}>{loading ? "Preparing…" : "Validate & prepare"}</button></form> : null}
       {directories.length ? <section className="surface directory-queue"><div className="surface-heading"><div><span>Assisted directory queue</span><small>Human and customer actions remain explicit</small></div></div>{directories.map((submission) => <div className="directory-row" key={submission.id}><div><strong>{submission.directory}</strong><small>{submission.mode}</small></div><p>{submission.requiredActions.join(" · ")}</p><EvidenceBadge state={submission.status} tone="warning" /></div>)}</section> : null}
       <section className="surface placement-ledger">
         <div className="surface-heading"><div><span>Placement evidence ledger</span><small>Only observed outcomes appear here</small></div></div>
@@ -309,14 +319,14 @@ function ReportsScreen({ result, fulfillment }: { result: PersistedAnalysisResul
 
 type BillingOffer = { packageId: "launch" | "authority" | "authority_plus"; amount: number | null; currency: string; active: boolean; type: string };
 
-function PackagesScreen({ offers, eligible, checkoutLoading, checkout }: { offers: BillingOffer[]; eligible: boolean; checkoutLoading: boolean; checkout: (packageId: BillingOffer["packageId"]) => void }) {
+function PackagesScreen({ offers, eligible, selectedPackageId, checkoutLoading, checkout }: { offers: BillingOffer[]; eligible: boolean; selectedPackageId?: BillingOffer["packageId"]; checkoutLoading: boolean; checkout: (packageId: BillingOffer["packageId"]) => void }) {
   const price = (packageId: BillingOffer["packageId"]) => {
     const offer = offers.find((candidate) => candidate.packageId === packageId);
     if (!offer?.active || offer.type !== "one_time" || offer.amount == null) return "Not configured";
     return new Intl.NumberFormat(undefined, { style: "currency", currency: offer.currency.toUpperCase(), maximumFractionDigits: 0 }).format(offer.amount / 100);
   };
-  const enabled = (packageId: BillingOffer["packageId"]) => eligible && !checkoutLoading && price(packageId) !== "Not configured";
-  return <div className="packages-screen"><div className="package-intro"><h2>Choose the outcome, not a pile of placements.</h2><p>{eligible ? "Your campaign and fulfillment order are eligible for secure Stripe Checkout." : "Checkout unlocks only after the campaign is approved and an eligible fulfillment order is prepared. Live charges remain disabled for sandbox fulfillment."}</p></div><div className="package-grid"><PackageCard name="Launch" promise="Establish your presence." price={price("launch")} features={["Launch intelligence", "Campaign creation", "Foundational distribution"]} disabled={!enabled("launch")} action={() => checkout("launch")} /><PackageCard name="Authority" promise="Become difficult to ignore." price={price("authority")} features={["Premium distribution", "Directory fulfillment", "Authority tracking"]} recommended disabled={!enabled("authority")} action={() => checkout("authority")} /><PackageCard name="Authority+" promise="Own your category." price={price("authority_plus")} features={["Expanded distribution", "AI visibility observation", "Ongoing authority intelligence"]} disabled={!enabled("authority_plus")} action={() => checkout("authority_plus")} /></div></div>;
+  const enabled = (packageId: BillingOffer["packageId"]) => eligible && selectedPackageId === packageId && !checkoutLoading && price(packageId) !== "Not configured";
+  return <div className="packages-screen"><div className="package-intro"><h2>Choose the outcome, not a pile of placements.</h2><p>{eligible ? `Your ${selectedPackageId?.replaceAll("_", " ") ?? "selected"} supplier quote is locked to secure Stripe Checkout.` : "Checkout unlocks only after the campaign is approved and an eligible fulfillment order is prepared. Live charges remain disabled for sandbox fulfillment."}</p></div><div className="package-grid"><PackageCard name="Launch" promise="Establish your presence." price={price("launch")} features={["Launch intelligence", "Campaign creation", "Foundational distribution"]} disabled={!enabled("launch")} action={() => checkout("launch")} /><PackageCard name="Authority" promise="Become difficult to ignore." price={price("authority")} features={["Premium distribution", "Directory fulfillment", "Authority tracking"]} recommended disabled={!enabled("authority")} action={() => checkout("authority")} /><PackageCard name="Authority+" promise="Own your category." price={price("authority_plus")} features={["Expanded distribution", "AI visibility observation", "Ongoing authority intelligence"]} disabled={!enabled("authority_plus")} action={() => checkout("authority_plus")} /></div></div>;
 }
 
 function EmptyIntelligence({ title, body }: { title: string; body: string }) {
@@ -513,8 +523,8 @@ export default function Home() {
     }
   }
 
-  function editCampaignAsset(id: string, content: string) {
-    setResult((current) => current?.campaign ? { ...current, campaign: { ...current.campaign, status: "draft", assets: current.campaign.assets.map((asset) => asset.id === id ? { ...asset, content, status: "draft" } : asset) } } : current);
+  function editCampaignAsset(id: string, field: "title" | "content", value: string) {
+    setResult((current) => current?.campaign ? { ...current, campaign: { ...current.campaign, status: "draft", assets: current.campaign.assets.map((asset) => asset.id === id ? { ...asset, [field]: value, status: "draft" } : asset) } } : current);
   }
 
   async function saveCampaignAssets(nextStatus: "draft" | "approved") {
@@ -543,11 +553,11 @@ export default function Home() {
     URL.revokeObjectURL(href);
   }
 
-  async function prepareFulfillmentState() {
+  async function prepareFulfillmentState(details: DistributionDetails) {
     if (!result?.projectId) return;
     setError(""); setFulfillmentLoading(true);
     try {
-      const response = await fetch(`/api/projects/${result.projectId}/fulfillment`, { method: "POST" });
+      const response = await fetch(`/api/projects/${result.projectId}/fulfillment`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(details) });
       const payload = await response.json();
       if (response.status === 401) return void window.location.assign("/login");
       if (!response.ok) throw new Error(payload.error ?? "Unable to prepare fulfillment.");
@@ -583,10 +593,10 @@ export default function Home() {
       {activeView === "Command Center" ? <CommandCenter result={result} status={status} openCampaign={() => setActiveView("Campaign Studio")} /> : null}
       {activeView === "Brand Intelligence" ? <BrandIntelligence result={result} claims={claims} editClaim={editClaim} editProfile={editProfile} editFinding={editFinding} addFinding={addFinding} saveEvidence={() => void saveCampaign("evidence_review")} saveState={saveState} /> : null}
       {activeView === "Campaign Studio" ? <CampaignStudio result={result} claims={claims} toggleClaim={toggleClaim} approvable={approvable} status={status} approve={() => void saveCampaign("approved")} generate={() => void generateCampaign()} editAsset={editCampaignAsset} saveAssets={(nextStatus) => void saveCampaignAssets(nextStatus)} exportAssets={exportCampaignAssets} generationStatus={generationStatus} /> : null}
-      {activeView === "Distribution Center" ? <DistributionCenter result={result} fulfillment={fulfillment} prepare={() => void prepareFulfillmentState()} loading={fulfillmentLoading} /> : null}
+      {activeView === "Distribution Center" ? <DistributionCenter result={result} fulfillment={fulfillment} prepare={(details) => void prepareFulfillmentState(details)} loading={fulfillmentLoading} /> : null}
       {activeView === "Authority Graph" ? <AuthorityGraphScreen result={result} /> : null}
       {activeView === "Reports" ? <ReportsScreen result={result} fulfillment={fulfillment} /> : null}
-      {activeView === "Packages" ? <PackagesScreen offers={billingOffers} eligible={result?.campaign?.status === "approved" && fulfillment?.order?.status === "awaiting_payment"} checkoutLoading={checkoutLoading} checkout={(packageId) => void startCheckout(packageId)} /> : null}
+      {activeView === "Packages" ? <PackagesScreen offers={billingOffers} eligible={result?.campaign?.status === "approved" && fulfillment?.order?.status === "awaiting_payment"} selectedPackageId={fulfillment?.order?.selectedPackageId} checkoutLoading={checkoutLoading} checkout={(packageId) => void startCheckout(packageId)} /> : null}
     </AppShell>
   );
 }

@@ -7,10 +7,10 @@ The following cannot be verified from public marketing pages alone:
 - Contractual definition of guaranteed publication by outlet.
 - Wholesale and volume pricing actually offered to Launch Auth.
 - Refund and rejection terms, service levels, minimum commitments, and restricted niches.
-- API rate limits, sandbox access, webhook behavior, reporting payloads, idempotency, and retraction behavior.
+- API rate limits, sandbox guarantees, webhook behavior, submit idempotency, and exact production payload behavior. PRNow publicly documents status, links/report, package refunds, and pending retraction, but these still need account-level verification.
 - White-label and custom-domain rights in signed terms.
 
-Required user action: approve vendor outreach and provide a business contact identity, or create vendor accounts and share non-secret sandbox access through the local environment.
+Required user action: create the PRNow pilot account, obtain an API key, purchase only the minimum test credits, and obtain written clarification of publication/guarantee language. Add the key only to `.env.local`; never share it in chat or commit it.
 
 ## Directory hands-on tests
 

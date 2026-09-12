@@ -25,7 +25,9 @@ Firebase Web configuration is public application metadata, not an administrator 
 
 Server-controlled campaign approvals, payment, order, job, directory, and placement records require `FIREBASE_SERVICE_ACCOUNT_JSON` (or Application Default Credentials on Google Cloud). OpenAI and Stripe secrets are server-only. Checkout uses Stripe-hosted Checkout Sessions, automatic tax, server-side Price IDs, signed webhooks, exact order reconciliation, and idempotent fulfillment transitions. Live checkout refuses non-billable sandbox fulfillment.
 
-The background worker is invoked through `POST /api/internal/jobs/run` with the job-runner bearer secret. Jobs use leases, crash recovery, retry backoff, and provider idempotency keys. Submitted provider orders automatically create recurring placement-verification work; public placement URLs are revalidated through a DNS-pinned request before the customer report treats them as live.
+The background worker is invoked through `POST /api/internal/jobs/run` with the job-runner bearer secret. Jobs use leases, crash recovery, and retry backoff. PRNow is implemented as a guarded pilot adapter, but its public API does not promise submit idempotency: an uncertain submit response stops for human reconciliation instead of retrying. Submitted provider orders automatically create recurring placement-verification work; public placement URLs are revalidated through a DNS-pinned request before the customer report treats them as live.
+
+The internal `/admin` workspace includes a non-publishing provider preflight plus journaled supplier-cancellation and Stripe-refund controls. Supplier credit recovery and customer card refunds are separate operations. Stripe’s signed webhook remains the source of truth for final customer billing state.
 
 The public `/api/health` endpoint is liveness-only. The secret-protected `/api/internal/readiness` endpoint evaluates every paid-launch gate without returning secret values. It must report `readyForPaidUsers: true` before inviting paid customers.
 

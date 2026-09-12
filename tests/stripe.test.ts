@@ -19,7 +19,10 @@ const order: ProviderOrder = {
   status: "awaiting_payment",
   checkoutAttempt: 2,
   stripeCheckoutSessionId: "cs_test_expected",
+  expectedStripeLivemode: true,
+  stripeLivemode: true,
   expectedPackageId: "authority",
+  selectedPackageId: "authority",
   expectedPriceId: "price_Example123",
   expectedAmountSubtotal: 9_900,
   expectedCurrency: "usd",
@@ -28,6 +31,7 @@ const order: ProviderOrder = {
 };
 
 const paidCheckout: PaidCheckout = {
+  livemode: true,
   uid: "user_123",
   projectId: "0123456789abcdef01234567",
   eventId: "evt_test_123",
@@ -42,6 +46,7 @@ const paidCheckout: PaidCheckout = {
 };
 
 const refund: RefundedPayment = {
+  livemode: true,
   paymentIntentId: "pi_test_123",
   eventId: "evt_refund_123",
   amount: 10_791,
@@ -64,6 +69,12 @@ describe("Stripe billing boundary", () => {
     expect(isStripeLiveMode()).toBe(true);
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_example");
     expect(isStripeLiveMode()).toBe(false);
+    vi.stubEnv("STRIPE_SECRET_KEY", "rk_live_example");
+    expect(isStripeLiveMode()).toBe(true);
+    vi.stubEnv("STRIPE_SECRET_KEY", "rk_test_example");
+    expect(isStripeLiveMode()).toBe(false);
+    vi.stubEnv("STRIPE_SECRET_KEY", "unknown_key");
+    expect(() => isStripeLiveMode()).toThrow(/mode cannot be determined/);
   });
 
   it("gates checkout on campaign approval, fulfillment eligibility, and live provider billing", () => {
@@ -97,12 +108,24 @@ describe("Stripe billing boundary", () => {
     ["subtotal", { amountSubtotal: 9_901 }],
     ["currency", { currency: "eur" }],
     ["attempt", { checkoutAttempt: 3 }],
+    ["mode", { livemode: false }],
   ])("rejects a paid checkout with a mismatched %s", (_label, override) => {
     expect(() => assertPaidCheckoutMatchesOrder(order, { ...paidCheckout, ...override })).toThrow(/does not match/);
   });
 
   it("rejects a duplicate or no-longer-payable order transition", () => {
     expect(() => assertPaidCheckoutMatchesOrder({ ...order, status: "paid" }, paidCheckout)).toThrow(/does not match/);
+  });
+
+  it("rejects payment when the prepared supplier package differs from checkout", () => {
+    expect(() => assertPaidCheckoutMatchesOrder({ ...order, selectedPackageId: "launch" }, paidCheckout)).toThrow(/does not match/);
+    expect(checkoutRoute).toContain("fulfillment.order.selectedPackageId !== packageId");
+  });
+
+  it("never authorizes live fulfillment with a test payment or live payment for a sandbox order", () => {
+    expect(() => assertPaidCheckoutMatchesOrder({ ...order, expectedStripeLivemode: false }, { ...paidCheckout, livemode: false })).toThrow(/does not match/);
+    expect(() => assertPaidCheckoutMatchesOrder({ ...order, sandbox: true, nonBillable: true }, paidCheckout)).toThrow(/does not match/);
+    expect(() => assertPaidCheckoutMatchesOrder({ ...order, sandbox: true, nonBillable: true, expectedStripeLivemode: false }, { ...paidCheckout, livemode: false })).not.toThrow();
   });
 
   it("reconciles cumulative partial and full refunds with the original charge", () => {

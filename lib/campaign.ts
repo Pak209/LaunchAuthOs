@@ -85,6 +85,7 @@ export async function generateCampaignAssets(
         "Every asset must cite the approved claim IDs it relies on. Do not cite any other IDs.",
         "Founder quotes must be labeled as suggested draft language and must not imply the founder already said them.",
         "Structured data must be valid JSON-LD but may contain only approved facts.",
+        "For the press_release asset, title must be the publication headline with 5–200 characters and at least five words; content must be a complete 250–1,150 word press release, leaving room for the required media contact block.",
         "Return exactly one asset of each required type.",
       ].join("\n"),
       input: JSON.stringify({

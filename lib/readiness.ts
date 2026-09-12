@@ -26,12 +26,21 @@ export function paidReadinessChecks(env: ReadinessEnvironment = process.env): Re
     env.NEXT_PUBLIC_FIREBASE_APP_ID,
   ].every(present);
   const provider = env.FULFILLMENT_PROVIDER?.trim().toLowerCase();
+  const providerPackages = ["LAUNCH", "AUTHORITY", "AUTHORITY_PLUS"];
+  const providerReady = provider === "prnow"
+    && present(env.PRNOW_API_KEY)
+    && env.PRNOW_SUBMIT_ENABLED === "true"
+    && providerPackages.every((suffix) => {
+      const cost = Number(env[`PRNOW_COST_CENTS_${suffix}`]);
+      const credits = Number(env[`PRNOW_REQUIRED_CREDITS_${suffix}`]);
+      return present(env[`PRNOW_PLAN_${suffix}`]) && Number.isSafeInteger(cost) && cost > 0 && Number.isSafeInteger(credits) && credits > 0;
+    });
   return [
     { id: "firebase_web", label: "Firebase Web authentication is configured", ready: firebaseWebReady, required: true, owner: "engineering" },
     { id: "firebase_admin", label: "Firebase Admin is configured for server-owned records", ready: present(env.FIREBASE_SERVICE_ACCOUNT_JSON) || present(env.GOOGLE_APPLICATION_CREDENTIALS) || present(env.K_SERVICE), required: true, owner: "engineering" },
     { id: "firestore_rules", label: "Current Firestore rules were deployed and live-tested", ready: enabled(env.FIRESTORE_RULES_VERIFIED), required: true, owner: "engineering" },
     { id: "openai", label: "Campaign generation model credentials are configured", ready: present(env.OPENAI_API_KEY) && present(env.OPENAI_MODEL), required: true, owner: "engineering" },
-    { id: "provider_adapter", label: "A contracted non-sandbox fulfillment adapter is configured", ready: present(provider) && provider !== "sandbox", required: true, owner: "supplier" },
+    { id: "provider_adapter", label: "The guarded PRNow pilot adapter, key, plan, and exact cost are configured", ready: providerReady, required: true, owner: "supplier" },
     { id: "provider_contract", label: "Provider contract and outcome language are approved", ready: enabled(env.FULFILLMENT_PROVIDER_CONTRACT_APPROVED), required: true, owner: "supplier" },
     { id: "provider_costs", label: "Provider costs and package margins are verified", ready: enabled(env.FULFILLMENT_PROVIDER_COSTS_VERIFIED), required: true, owner: "operations" },
     { id: "stripe", label: "Stripe secret, webhook, and all package prices are configured", ready: [env.STRIPE_SECRET_KEY, env.STRIPE_WEBHOOK_SECRET, env.STRIPE_PRICE_LAUNCH, env.STRIPE_PRICE_AUTHORITY, env.STRIPE_PRICE_AUTHORITY_PLUS].every(present), required: true, owner: "engineering" },
@@ -56,4 +65,10 @@ export function paidReadiness(env: ReadinessEnvironment = process.env) {
     requiredCount: required.length,
     checks,
   };
+}
+
+export function assertCheckoutReadiness(livemode: boolean, env: ReadinessEnvironment = process.env) {
+  if (livemode && !paidReadiness(env).readyForPaidUsers) {
+    throw new Error("Live checkout is disabled until the production launch checklist is complete.");
+  }
 }

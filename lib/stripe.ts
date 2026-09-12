@@ -21,7 +21,11 @@ export function getStripePriceId(packageId: PackageId) {
 }
 
 export function isStripeLiveMode() {
-  return process.env.STRIPE_SECRET_KEY?.startsWith("sk_live_") ?? false;
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) throw new Error("Stripe is not configured yet.");
+  if (/^(sk|rk)_live_/.test(key)) return true;
+  if (/^(sk|rk)_test_/.test(key)) return false;
+  throw new Error("Stripe key mode cannot be determined. Configure a live or test server key.");
 }
 
 export function getStripeWebhookSecret() {

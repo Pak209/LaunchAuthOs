@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { paidReadiness } from "../lib/readiness";
+import { assertCheckoutReadiness, paidReadiness } from "../lib/readiness";
 
 const internalRoute = readFileSync(new URL("../app/api/internal/readiness/route.ts", import.meta.url), "utf8");
 
@@ -16,7 +16,18 @@ function readyEnv(): Record<string, string | undefined> {
     FIRESTORE_RULES_VERIFIED: "true",
     OPENAI_API_KEY: "openai-key",
     OPENAI_MODEL: "model",
-    FULFILLMENT_PROVIDER: "contracted-provider",
+    FULFILLMENT_PROVIDER: "prnow",
+    PRNOW_API_KEY: "prnow_test_key",
+    PRNOW_PLAN_LAUNCH: "standard",
+    PRNOW_COST_CENTS_LAUNCH: "2175",
+    PRNOW_REQUIRED_CREDITS_LAUNCH: "10",
+    PRNOW_PLAN_AUTHORITY: "advanced",
+    PRNOW_COST_CENTS_AUTHORITY: "14900",
+    PRNOW_REQUIRED_CREDITS_AUTHORITY: "100",
+    PRNOW_PLAN_AUTHORITY_PLUS: "advanced",
+    PRNOW_COST_CENTS_AUTHORITY_PLUS: "14900",
+    PRNOW_REQUIRED_CREDITS_AUTHORITY_PLUS: "100",
+    PRNOW_SUBMIT_ENABLED: "true",
     FULFILLMENT_PROVIDER_CONTRACT_APPROVED: "true",
     FULFILLMENT_PROVIDER_COSTS_VERIFIED: "true",
     STRIPE_SECRET_KEY: "sk_live_example",
@@ -56,6 +67,14 @@ describe("paid launch readiness", () => {
     const result = paidReadiness(readyEnv());
     expect(result.readyForPaidUsers).toBe(true);
     expect(result.readyCount).toBe(result.requiredCount);
+  });
+
+  it("enforces every required gate before live checkout while allowing test-mode setup", () => {
+    expect(() => assertCheckoutReadiness(true, readyEnv())).not.toThrow();
+    expect(() => assertCheckoutReadiness(false, {})).not.toThrow();
+    for (const field of ["LEGAL_DOCUMENTS_APPROVED", "FULFILLMENT_PROVIDER_CONTRACT_APPROVED", "FULFILLMENT_PROVIDER_COSTS_VERIFIED", "PRNOW_SUBMIT_ENABLED", "FIREBASE_SERVICE_ACCOUNT_JSON", "STRIPE_WEBHOOK_SECRET", "JOB_RUNNER_SECRET"]) {
+      expect(() => assertCheckoutReadiness(true, { ...readyEnv(), [field]: "" })).toThrow(/disabled/);
+    }
   });
 
   it("keeps the detailed readiness response behind the internal job secret", () => {
