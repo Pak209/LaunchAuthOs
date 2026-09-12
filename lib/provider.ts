@@ -1,4 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+
+export function providerReleaseBindingPath(provider: string, externalId: string) {
+  return `providerReleaseBindings/${createHash("sha256").update(JSON.stringify([provider, externalId])).digest("hex")}`;
+}
 
 export type ProviderQuote = { provider: string; sandbox: boolean; nonBillable: boolean; providerCostCents: number; currency: string; providerPlan?: string; requiredCredits?: number | null };
 export type ProviderPreflight = ProviderQuote & { packageId: ProviderPackageId; availableCredits: number | null; requiredCredits: number | null; submissionEnabled: boolean };

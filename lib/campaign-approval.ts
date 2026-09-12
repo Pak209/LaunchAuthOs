@@ -48,10 +48,22 @@ export async function attestCampaignApproval(
   if (campaign.status !== "approved") throw new Error("Only an approved campaign can be attested.");
   const project = db.doc(`workspaces/personal_${uid}/projects/${projectId}`);
   const approval = project.collection("campaignApprovals").doc("current");
+  const currentCampaign = project.collection("campaigns").doc("current");
   const digest = campaignDigest(campaign);
   await db.runTransaction(async (transaction) => {
-    const projectSnapshot = await transaction.get(project);
+    const [projectSnapshot, campaignSnapshot] = await Promise.all([
+      transaction.get(project), transaction.get(currentCampaign),
+    ]);
     if (!projectSnapshot.exists || projectSnapshot.data()?.createdBy !== uid) throw new Error("The project was not found.");
+    const current = campaignSnapshot.data() as CampaignDraft | undefined;
+    // Approval is a separate server write after the customer revision. An edit,
+    // generation or restore can win between those writes; never attest an old
+    // response merely because it was approved when originally saved.
+    if (!current || current.status !== "approved" || !Array.isArray(current.assets)
+      || !current.assets.length || current.assets.some((asset) => asset.status !== "approved")
+      || campaignDigest(current) !== digest) {
+      throw new Error("The approved campaign no longer matches the saved version. Reload and approve the current campaign.");
+    }
     transaction.set(approval, {
       campaignVersion: campaign.version,
       campaignDigest: digest,

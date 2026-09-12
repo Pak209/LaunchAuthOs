@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { assertCampaignAttestation, campaignDigest } from "../lib/campaign-approval";
+import { assertCampaignAttestation, attestCampaignApproval, campaignDigest } from "../lib/campaign-approval";
 import type { CampaignDraft } from "../lib/types";
+import { MemoryFirestore } from "./helpers/memory-firestore";
 
 const campaign: CampaignDraft = {
   version: 4,
@@ -40,5 +41,43 @@ describe("server-owned campaign approval", () => {
     const draft = { ...campaign, status: "draft" as const };
     const approval = { campaignVersion: draft.version, campaignDigest: campaignDigest(draft), approvedBy: "user-1" };
     expect(() => assertCampaignAttestation(draft, approval, "user-1")).toThrow(/Approve/);
+  });
+
+  it("attests the exact saved approved version inside a transaction", async () => {
+    const db = new MemoryFirestore();
+    const projectPath = `workspaces/personal_user-1/projects/${"a".repeat(24)}`;
+    db.seed(projectPath, { createdBy: "user-1" });
+    db.seed(`${projectPath}/campaigns/current`, campaign);
+    const result = await attestCampaignApproval(db.asFirestore(), "user-1", "a".repeat(24), campaign);
+    expect(result).toEqual({ campaignVersion: campaign.version, campaignDigest: campaignDigest(campaign), approvedBy: "user-1" });
+    expect(db.read(`${projectPath}/campaignApprovals/current`)).toMatchObject(result);
+    expect([...db.rows.keys()].filter((path) => path.includes("/auditLogs/"))).toHaveLength(1);
+  });
+
+  it.each(["restored-draft", "new-version", "changed-content", "draft-asset", "missing-current"])("does not re-attest stale approval after %s", async (scenario) => {
+    const db = new MemoryFirestore();
+    const projectPath = `workspaces/personal_user-1/projects/${"a".repeat(24)}`;
+    db.seed(projectPath, { createdBy: "user-1" });
+    if (scenario !== "missing-current") db.seed(`${projectPath}/campaigns/current`, {
+      ...campaign,
+      ...(scenario === "restored-draft" ? { version: 5, status: "draft" } : {}),
+      ...(scenario === "new-version" ? { version: 5 } : {}),
+      ...(scenario === "changed-content" ? { assets: campaign.assets.map((asset) => ({ ...asset, content: "A subsequent customer edit" })) } : {}),
+      ...(scenario === "draft-asset" ? { assets: campaign.assets.map((asset) => ({ ...asset, status: "draft" })) } : {}),
+    });
+    const revoked = { status: "revoked", reason: "campaign_restored" };
+    db.seed(`${projectPath}/campaignApprovals/current`, revoked);
+    await expect(attestCampaignApproval(db.asFirestore(), "user-1", "a".repeat(24), campaign)).rejects.toThrow("no longer matches");
+    expect(db.read(`${projectPath}/campaignApprovals/current`)).toEqual(revoked);
+    expect([...db.rows.keys()].filter((path) => path.includes("/auditLogs/"))).toHaveLength(0);
+  });
+
+  it("does not attest another customer's project", async () => {
+    const db = new MemoryFirestore();
+    const projectPath = `workspaces/personal_user-1/projects/${"a".repeat(24)}`;
+    db.seed(projectPath, { createdBy: "someone-else" });
+    db.seed(`${projectPath}/campaigns/current`, campaign);
+    await expect(attestCampaignApproval(db.asFirestore(), "user-1", "a".repeat(24), campaign)).rejects.toThrow("not found");
+    expect(db.rows.has(`${projectPath}/campaignApprovals/current`)).toBe(false);
   });
 });

@@ -35,8 +35,9 @@ export async function GET(request: Request, context: { params: Promise<{ project
       "## Approved claims", "", ...report.approvedClaims.flatMap((claim) => [`- ${claim.text}`, `  - Source: ${claim.sourceUrl}`, `  - Evidence: ${(claim.evidenceIds ?? []).join(", ") || "legacy source"}`]), "",
       "## Evidence snapshots", "", ...report.evidenceSnapshots.map((source) => `- ${source.title || source.url} — ${source.url} — captured ${source.capturedAt} — SHA-256 ${source.contentHash}`), "",
       "## Campaign assets", "", ...(report.campaign?.assets.map((asset) => `- ${asset.title} — ${asset.status} — evidence ${asset.claimIds.join(", ")}`) ?? ["- No generated campaign assets"]), "",
-      "## Fulfillment", "", `Provider order: ${report.fulfillment.order?.status ?? "not prepared"}`, ...report.fulfillment.directories.map((item) => `- ${item.directory}: ${item.status}`), "",
+      "## Fulfillment", "", `Provider order: ${report.fulfillment.order?.status ?? "not prepared"}`, ...report.fulfillment.directories.map((item) => `- ${item.directory}: ${item.status} — ${item.listingUrl ?? item.submissionUrl ?? "No URL recorded"} — ${item.evidenceSource === "operator_recorded" ? "operator-recorded, not independently verified" : "awaiting operator evidence"} — updated ${item.updatedAt}`), "",
       "## Placements", "", ...(report.fulfillment.placements?.map((placement) => `- ${placement.outlet}: ${placement.state} — ${placement.url}`) ?? []),
+      "", "## Measurement limitations", "", "HTTP checks establish URL availability, not content accuracy or earned editorial coverage. Indexed states are supplier-reported, not independently checked. Directory outcomes are recorded by a human operator. No independent backlink, search ranking, or AI visibility measurements are included.",
     ];
     return new NextResponse(lines.join("\n"), { headers: { "content-type": "text/markdown; charset=utf-8", "content-disposition": `attachment; filename="${safeFilename(report.company)}-authority-report.md"`, "cache-control": "private, no-store" } });
   } catch (error) {

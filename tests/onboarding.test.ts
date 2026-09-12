@@ -16,4 +16,11 @@ describe("first-run workspace", () => {
     expect(page).toContain('const [url, setUrl] = useState("")');
     expect(page).toContain('placeholder="https://yourcompany.com"');
   });
+
+  it("does not globally hide resume and version-history buttons on mobile", () => {
+    const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+    expect(css).not.toContain(".topbar p, .mode-button, .profile-avatar");
+    expect(css).toContain(".topbar .mode-button.intelligence, .topbar .mode-button.authority");
+    expect(css).toContain(".topbar-actions { flex-wrap: wrap; }");
+  });
 });

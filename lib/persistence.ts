@@ -39,7 +39,7 @@ function projectDocumentId(uid: string, url: string): string {
   return createHash("sha256").update(`${uid}:${url}`).digest("hex").slice(0, 24);
 }
 
-async function ensureWorkspace(db: Firestore, user: User): Promise<string> {
+export async function ensureWorkspace(db: Firestore, user: User): Promise<string> {
   const workspaceId = personalWorkspaceId(user.uid);
   const workspaceRef = doc(db, "workspaces", workspaceId);
   const memberRef = doc(db, "workspaces", workspaceId, "members", user.uid);

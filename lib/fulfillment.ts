@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import type { CampaignDraft, DirectorySubmission, FulfillmentState, JobRun, Placement, ProviderOrder } from "./types";
-import { ProviderSubmissionNeedsReviewError, type DistributionDetails, type DistributionProvider, type ProviderPackageId, type ProviderQuote } from "./provider";
+import { providerReleaseBindingPath, ProviderSubmissionNeedsReviewError, type DistributionDetails, type DistributionProvider, type ProviderPackageId, type ProviderQuote } from "./provider";
 import { isTransactionalEmailConfigured, type TransactionalEmailProvider } from "./email";
 import { assertCampaignAttestation, campaignDigest, type CampaignApprovalAttestation } from "./campaign-approval";
 import { verifyPublicPlacementUrl } from "./placement-verification";
@@ -243,7 +243,10 @@ export async function loadFulfillmentState(db: Firestore, uid: string, projectId
   const [orderSnapshot, directorySnapshot, jobSnapshot, placementSnapshot] = await Promise.all([order.get(), directories.orderBy("createdAt", "asc").get(), jobs.orderBy("createdAt", "asc").get(), placements.limit(500).get()]);
   return {
     order: orderSnapshot.exists ? orderSnapshot.data() as ProviderOrder : null,
-    directories: directorySnapshot.docs.map((snapshot) => snapshot.data() as DirectorySubmission),
+    directories: directorySnapshot.docs.map((snapshot) => {
+      const { operatorId, operatorNote, ...customerRecord } = snapshot.data();
+      return customerRecord as DirectorySubmission;
+    }),
     jobs: jobSnapshot.docs.map((snapshot) => snapshot.data() as JobRun),
     placements: placementSnapshot.docs.map((snapshot) => snapshot.data() as Placement),
   };
@@ -264,10 +267,12 @@ export async function prepareFulfillment(
   const approval = project.collection("campaignApprovals").doc("current");
   const now = new Date().toISOString();
   await db.runTransaction(async (transaction) => {
-    const [projectSnapshot, orderSnapshot, approvalSnapshot] = await Promise.all([
-      transaction.get(project), transaction.get(order), transaction.get(approval),
+    const [projectSnapshot, orderSnapshot, approvalSnapshot, currentCampaignSnapshot] = await Promise.all([
+      transaction.get(project), transaction.get(order), transaction.get(approval), transaction.get(project.collection("campaigns").doc("current")),
     ]);
     if (!projectSnapshot.exists || projectSnapshot.data()?.createdBy !== uid) throw new Error("The project was not found.");
+    const currentCampaign = currentCampaignSnapshot.data() as CampaignDraft | undefined;
+    if (!currentCampaign || currentCampaign.status !== "approved" || campaignDigest(currentCampaign) !== campaignDigest(campaign)) throw new Error("The campaign changed. Review and approve the current campaign before fulfillment.");
     assertCampaignAttestation(campaign, approvalSnapshot.data() as CampaignApprovalAttestation | undefined, uid);
     if (orderSnapshot.exists) return;
     const profile = projectSnapshot.data()?.profile;
@@ -292,7 +297,7 @@ export async function prepareFulfillment(
     };
     transaction.create(order, { ...providerOrder, createdAtServer: FieldValue.serverTimestamp(), updatedAtServer: FieldValue.serverTimestamp() });
     for (const template of directoryTemplates) {
-      const submission: DirectorySubmission = { ...template, status: "needs_customer", createdAt: now, updatedAt: now };
+      const submission: DirectorySubmission = { ...template, status: "needs_customer", orderId: "current", campaignVersion: campaign.version, campaignDigest: campaignDigest(campaign), revision: 0, createdAt: now, updatedAt: now };
       transaction.create(directories.doc(template.id), { ...submission, createdAtServer: FieldValue.serverTimestamp(), updatedAtServer: FieldValue.serverTimestamp() });
     }
     const job: JobRun = {
@@ -443,9 +448,10 @@ export async function markPaymentIntentRefunded(db: Firestore, input: RefundedPa
   if (!order) throw new Error("The refunded payment could not be matched to an order.");
   const project = order.ref.parent.parent;
   if (!project) throw new Error("The refunded order has no project.");
+  const submissionJobRef = project.collection("jobs").doc("provider_submission_current");
   const now = new Date().toISOString();
   await db.runTransaction(async (transaction) => {
-    const [eventSnapshot, orderSnapshot] = await Promise.all([transaction.get(eventRef), transaction.get(order.ref)]);
+    const [eventSnapshot, orderSnapshot, jobSnapshot] = await Promise.all([transaction.get(eventRef), transaction.get(order.ref), transaction.get(submissionJobRef)]);
     if (eventSnapshot.exists) return;
     if (!orderSnapshot.exists) throw new Error("The refunded payment could not be matched to an order.");
     const orderData = orderSnapshot.data() as ProviderOrder;
@@ -455,6 +461,13 @@ export async function markPaymentIntentRefunded(db: Firestore, input: RefundedPa
     if (input.amountRefunded <= (orderData.refundedAmountCents ?? 0)) return;
     const billingStatus = input.fullyRefunded ? "refunded" : "partially_refunded";
     const fulfillmentStatus = input.fullyRefunded && orderData.status === "paid" && !orderData.providerSubmissionStartedAt ? "refunded" : orderData.status;
+    const submissionJob = jobSnapshot.data() as JobRun | undefined;
+    if (input.fullyRefunded && !orderData.providerSubmissionStartedAt && jobSnapshot.exists && !submissionJob?.dispatchStartedAt && !submissionJob?.needsHumanReview && submissionJob?.status !== "complete") {
+      transaction.update(submissionJobRef, {
+        status: "complete", lastError: "Closed before supplier dispatch after a full customer refund.",
+        nextAttemptAt: FieldValue.delete(), blockedReason: FieldValue.delete(), ...clearLease(), updatedAt: now, updatedAtServer: FieldValue.serverTimestamp(),
+      });
+    }
     transaction.update(order.ref, {
       status: fulfillmentStatus,
       billingStatus,
@@ -521,9 +534,12 @@ async function runProviderSubmission(db: Firestore, jobRef: FirebaseFirestore.Do
     dispatchStarted = true;
     const submission = await provider.submit(input);
     const now = new Date().toISOString();
+    const releaseBinding = db.doc(providerReleaseBindingPath(orderData.provider, submission.externalId));
     await db.runTransaction(async (transaction) => {
-      const currentJob = await transaction.get(jobRef);
+      const [currentJob, binding] = await Promise.all([transaction.get(jobRef), transaction.get(releaseBinding)]);
       if (!currentJob.exists || currentJob.data()?.status !== "running" || currentJob.data()?.runToken !== claimed.runToken) return;
+      if (binding.exists && binding.data()?.orderPath !== order.path) throw new ProviderSubmissionNeedsReviewError("The supplier returned a release already bound to another order. Reconcile the provider response.");
+      transaction.set(releaseBinding, { provider: orderData.provider, externalId: submission.externalId, orderPath: order.path, boundAt: now });
       transaction.update(jobRef, { status: "complete", failureCount: 0, lastError: FieldValue.delete(), ...clearLease(), updatedAt: now, updatedAtServer: FieldValue.serverTimestamp() });
       transaction.update(order, {
         status: submission.status,

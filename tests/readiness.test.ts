@@ -14,6 +14,8 @@ function readyEnv(): Record<string, string | undefined> {
     NEXT_PUBLIC_FIREBASE_APP_ID: "app-123",
     FIREBASE_SERVICE_ACCOUNT_JSON: "configured",
     FIRESTORE_RULES_VERIFIED: "true",
+    FIRESTORE_INDEXES_VERIFIED: "true",
+    JOB_SCHEDULER_VERIFIED: "true",
     OPENAI_API_KEY: "openai-key",
     OPENAI_MODEL: "model",
     FULFILLMENT_PROVIDER: "prnow",
@@ -72,7 +74,7 @@ describe("paid launch readiness", () => {
   it("enforces every required gate before live checkout while allowing test-mode setup", () => {
     expect(() => assertCheckoutReadiness(true, readyEnv())).not.toThrow();
     expect(() => assertCheckoutReadiness(false, {})).not.toThrow();
-    for (const field of ["LEGAL_DOCUMENTS_APPROVED", "FULFILLMENT_PROVIDER_CONTRACT_APPROVED", "FULFILLMENT_PROVIDER_COSTS_VERIFIED", "PRNOW_SUBMIT_ENABLED", "FIREBASE_SERVICE_ACCOUNT_JSON", "STRIPE_WEBHOOK_SECRET", "JOB_RUNNER_SECRET"]) {
+    for (const field of ["LEGAL_DOCUMENTS_APPROVED", "FULFILLMENT_PROVIDER_CONTRACT_APPROVED", "FULFILLMENT_PROVIDER_COSTS_VERIFIED", "PRNOW_SUBMIT_ENABLED", "FIREBASE_SERVICE_ACCOUNT_JSON", "STRIPE_WEBHOOK_SECRET", "JOB_RUNNER_SECRET", "JOB_SCHEDULER_VERIFIED", "FIRESTORE_INDEXES_VERIFIED"]) {
       expect(() => assertCheckoutReadiness(true, { ...readyEnv(), [field]: "" })).toThrow(/disabled/);
     }
   });

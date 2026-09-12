@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { analyzeCompany } from "@/lib/analyze";
-import { persistAnalysis } from "@/lib/persistence";
+import { ensureWorkspace } from "@/lib/persistence";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getAuthenticatedFirebaseContext } from "@/lib/firebase/server";
 import { clientRateLimitKey, enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
 import { assertSameOrigin } from "@/lib/request-security";
+import { getFirebaseAdminDb, isFirebaseAdminExplicitlyConfigured } from "@/lib/firebase/admin";
+import { enqueueIntelligenceJob } from "@/lib/intelligence-jobs";
 
 export const runtime = "nodejs";
 
@@ -22,14 +24,11 @@ export async function POST(request: Request) {
     }
 
     const { db, user } = await getAuthenticatedFirebaseContext();
+    if (!isFirebaseAdminExplicitlyConfigured()) return NextResponse.json({ error: "Background intelligence is not configured yet. Configure Firebase Admin and the job runner before starting analysis." }, { status: 503 });
     await enforceRateLimit(user.uid, "analyze", 10, 60);
-    const result = await analyzeCompany(body.url);
-    try {
-      return NextResponse.json(await persistAnalysis(db, user, result));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to save this analysis.";
-      return NextResponse.json({ error: message }, { status: 503 });
-    }
+    await ensureWorkspace(db, user);
+    const job = await enqueueIntelligenceJob(getFirebaseAdminDb(), user.uid, { type: "analysis", url: body.url });
+    return NextResponse.json({ job }, { status: 202, headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to analyze this URL.";
     if (error instanceof RateLimitError) return NextResponse.json({ error: message }, { status: 429, headers: { "retry-after": String(error.retryAfterSeconds) } });

@@ -43,6 +43,15 @@ async function fixture() {
 afterEach(() => vi.useRealTimers());
 
 describe("durable supplier dispatch", () => {
+  it("rejects a stale approved campaign when an order is prepared after restoration", async () => {
+    const db = new MemoryFirestore();
+    db.seed(project, { createdBy: "owner", profile: { company: "Acme", sourceUrl: "https://acme.example" } });
+    db.seed(`${project}/campaigns/current`, { ...campaign, version: 2, status: "draft" });
+    db.seed(`${project}/campaignApprovals/current`, { approvedBy: "owner", campaignVersion: 1, campaignDigest: campaignDigest(campaign) });
+    await expect(prepareFulfillment(db.asFirestore(), "owner", projectId, campaign, quote, details, "launch")).rejects.toThrow(/campaign changed/);
+    expect(db.rows.has(orderPath)).toBe(false);
+    expect(db.rows.has(jobPath)).toBe(false);
+  });
   it("persists the dispatch fence before the actual supplier call and submits frozen company/plan details", async () => {
     const { db, submit, resolve, run } = await fixture();
     db.seed(project, { ...db.read(project), profile: { company: "Edited after checkout", sourceUrl: "https://other.example" } });
@@ -198,6 +207,7 @@ describe("durable supplier dispatch", () => {
     await markPaymentIntentRefunded(db.asFirestore(), { ...refund, eventId: "evt_full", amountRefunded: 9900, fullyRefunded: true });
     await markPaymentIntentRefunded(db.asFirestore(), { ...refund, eventId: "evt_partial", amountRefunded: 2000, fullyRefunded: false });
     expect(db.read(orderPath)).toMatchObject({ refundedAmountCents: 9900, billingStatus: "refunded", status: "refunded" });
+    expect(db.read(jobPath)).toMatchObject({ status: "complete" });
     expect(db.read("stripeEvents/evt_partial").amountRefunded).toBe(2000);
     await run();
     expect(submit).not.toHaveBeenCalled();

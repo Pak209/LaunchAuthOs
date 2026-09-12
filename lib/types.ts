@@ -94,7 +94,7 @@ export type CampaignDraft = {
 };
 
 export type ProviderOrderStatus = "quote_ready" | "awaiting_payment" | "paid" | "submitted" | "processing" | "published" | "failed" | "canceled" | "refunded";
-export type DirectorySubmissionStatus = "needs_customer" | "ready_for_human" | "submitted" | "accepted" | "published" | "failed";
+export type DirectorySubmissionStatus = "needs_customer" | "ready_for_human" | "queued" | "submitted" | "accepted" | "published" | "rejected" | "failed" | "removed";
 
 export type ProviderOrder = {
   id: string;
@@ -109,6 +109,7 @@ export type ProviderOrder = {
   requiredCredits?: number;
   submissionInput?: import("./provider").ProviderSubmissionInput;
   providerSubmissionStartedAt?: string;
+  reconciliationRevision?: number;
   campaignVersion: number;
   campaignDigest: string;
   status: ProviderOrderStatus;
@@ -141,6 +142,23 @@ export type DirectorySubmission = {
   mode: "assisted" | "manual" | "editorial";
   status: DirectorySubmissionStatus;
   requiredActions: string[];
+  orderId?: "current";
+  campaignVersion?: number;
+  campaignDigest?: string;
+  revision?: number;
+  attempt?: number;
+  submissionUrl?: string;
+  listingUrl?: string;
+  evidenceSource?: "operator_recorded";
+  lastObservedAt?: string;
+  queuedAt?: string;
+  submittedAt?: string;
+  acceptedAt?: string;
+  publishedAt?: string;
+  rejectedAt?: string;
+  failedAt?: string;
+  removedAt?: string;
+  operatorRecordedAt?: string;
   createdAt: string;
   updatedAt: string;
 };

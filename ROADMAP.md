@@ -7,13 +7,14 @@
 - Real, versioned, evidence-bounded AI campaign generation and downloadable evidence reports are implemented; production model credentials remain a deployment gate.
 - Stripe Checkout/webhooks, exact paid-order reconciliation, partial/full refund accounting, and non-billable sandbox protection are implemented.
 - Durable fulfillment/email/verification jobs, internal queue, retry controls, placement monitoring, and removed-link detection are implemented.
+- Directory operator status/evidence recording, customer-visible directory URLs, saved campaign version browsing/restoration, and actual dashboard/placement-ledger wiring are implemented. Integration acceptance remains required.
 - A guarded PRNow adapter, package/cost/credit preflight, package-bound checkout, uncertain-submit reconciliation, and journaled provider cancellation/customer refund controls are implemented.
 - Finish supplier contracting, actual cost verification, the controlled provider pilot, legal approval, production infrastructure, and controlled-beta operations.
 
 ## Next
 
-- Complete administrator-led supplier reconciliation and validate dispatch fences against Firestore, including crashes and ambiguous responses. Live checkout/test-payment isolation and immutable provider-plan binding are now enforced in code.
-- Finish durable crawling/generation jobs and actual error-reporting instrumentation.
+- Administrator-led supplier reconciliation and durable crawling/generation jobs are implemented with local regression coverage. Validate these flows against Firestore and the controlled supplier pilot, including crashes and ambiguous responses.
+- Deploy worker/billing indexes, configure the production scheduler, and add actual error-reporting instrumentation.
 - Create and minimally fund the supplier account, run a supervised low-volume lifecycle pilot, and keep live submissions locked until the observed results and written terms pass review.
 - Complete hands-on assisted-directory fulfillment tests and document the operator playbook.
 - Configure production hosting, domain, email, error monitoring, backups, scheduler, Stripe, Firebase Admin, and OpenAI secrets.

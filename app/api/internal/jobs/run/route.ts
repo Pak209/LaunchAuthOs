@@ -4,8 +4,10 @@ import { getFirebaseAdminDb } from "@/lib/firebase/admin";
 import { runQueuedFulfillmentJobs } from "@/lib/fulfillment";
 import { getDistributionProvider } from "@/lib/provider";
 import { getTransactionalEmailProvider } from "@/lib/email";
+import { runQueuedIntelligenceJobs } from "@/lib/intelligence-jobs";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 function authorized(request: Request) {
   const expected = process.env.JOB_RUNNER_SECRET;
@@ -17,8 +19,19 @@ function authorized(request: Request) {
 export async function POST(request: Request) {
   if (!authorized(request)) return NextResponse.json({ error: "Not found." }, { status: 404 });
   try {
-    const result = await runQueuedFulfillmentJobs(getFirebaseAdminDb(), getDistributionProvider, getTransactionalEmailProvider());
-    return NextResponse.json(result, { headers: { "cache-control": "no-store" } });
+    const db = getFirebaseAdminDb();
+    const [fulfillment, intelligence] = await Promise.allSettled([
+      Promise.resolve().then(() => runQueuedFulfillmentJobs(db, getDistributionProvider, getTransactionalEmailProvider())),
+      runQueuedIntelligenceJobs(db),
+    ]);
+    // Await both groups even on a partial failure: returning early can terminate
+    // unrelated in-flight work on request-scoped production runtimes.
+    const errors = [fulfillment, intelligence].flatMap((result, index) => result.status === "rejected" ? [{ worker: index === 0 ? "fulfillment" : "intelligence", message: result.reason instanceof Error ? result.reason.message : "Worker failed." }] : []);
+    return NextResponse.json({
+      ...(fulfillment.status === "fulfilled" ? fulfillment.value : {}),
+      ...(intelligence.status === "fulfilled" ? intelligence.value : {}),
+      ...(errors.length ? { errors } : {}),
+    }, { status: errors.length ? 500 : 200, headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Job processing failed.";
     return NextResponse.json({ error: message }, { status: 500 });
