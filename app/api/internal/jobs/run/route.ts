@@ -5,6 +5,7 @@ import { runQueuedFulfillmentJobs } from "@/lib/fulfillment";
 import { getDistributionProvider } from "@/lib/provider";
 import { getTransactionalEmailProvider } from "@/lib/email";
 import { runQueuedIntelligenceJobs } from "@/lib/intelligence-jobs";
+import { runQueuedSiteDiagnosticJobs } from "@/lib/site-diagnostic-jobs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -20,16 +21,18 @@ export async function POST(request: Request) {
   if (!authorized(request)) return NextResponse.json({ error: "Not found." }, { status: 404 });
   try {
     const db = getFirebaseAdminDb();
-    const [fulfillment, intelligence] = await Promise.allSettled([
+    const [fulfillment, intelligence, diagnostics] = await Promise.allSettled([
       Promise.resolve().then(() => runQueuedFulfillmentJobs(db, getDistributionProvider, getTransactionalEmailProvider())),
       runQueuedIntelligenceJobs(db),
+      runQueuedSiteDiagnosticJobs(db),
     ]);
-    // Await both groups even on a partial failure: returning early can terminate
+    // Await every group even on a partial failure: returning early can terminate
     // unrelated in-flight work on request-scoped production runtimes.
-    const errors = [fulfillment, intelligence].flatMap((result, index) => result.status === "rejected" ? [{ worker: index === 0 ? "fulfillment" : "intelligence", message: result.reason instanceof Error ? result.reason.message : "Worker failed." }] : []);
+    const errors = [fulfillment, intelligence, diagnostics].flatMap((result, index) => result.status === "rejected" ? [{ worker: ["fulfillment", "intelligence", "diagnostics"][index], message: result.reason instanceof Error ? result.reason.message : "Worker failed." }] : []);
     return NextResponse.json({
       ...(fulfillment.status === "fulfilled" ? fulfillment.value : {}),
       ...(intelligence.status === "fulfilled" ? intelligence.value : {}),
+      ...(diagnostics.status === "fulfilled" ? diagnostics.value : {}),
       ...(errors.length ? { errors } : {}),
     }, { status: errors.length ? 500 : 200, headers: { "cache-control": "no-store" } });
   } catch (error) {

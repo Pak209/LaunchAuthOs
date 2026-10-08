@@ -15,6 +15,17 @@
 
 All externally observed claims should link to one or more evidence items.
 
+## Customer-site diagnostic observations
+
+Under `workspaces/personal_{uid}`:
+
+- `siteDiagnosticJobs/{jobId}`: authorized saved URL, actor/time, project and tenant identity, public status, bounded attempts, private lease token/expiry and retry time.
+- `siteDiagnosticRequests/{projectId}`: current deduplicated job pointer.
+- `siteDiagnosticLatest/{projectId}`: latest completed report pointer, preserved while another run is pending or fails.
+- `projects/{projectId}/siteDiagnosticReports/{jobId}`: immutable version-1 report envelope bound to the user/workspace/project/job. Includes response snapshots and SHA-256 hashes, per-finding scope/capture time/evidence references, page and sitemap observations, skipped URLs, errors and explicit limitations.
+
+These records are Admin-only under the default-deny client rules. Authenticated API routes independently validate membership, project ownership and tenant binding; viewer access is read-only. Report creation, completion and the latest pointer use one transaction, fenced by the active lease token and unchanged saved URL/current request. They never modify campaign evidence, approvals, orders or project lifecycle. Actual search-engine index status remains unmeasured; fetched pages and sitemap membership cannot populate it. Retention and customer deletion procedures must cover these private snapshots before rollout.
+
 ## Firebase V0.2 layout
 
 The production foundation now uses these tenant-isolated records:

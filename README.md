@@ -34,6 +34,14 @@ The public `/api/health` endpoint is liveness-only. The secret-protected `/api/i
 ## Verification
 
 Run `npm run lint`, `npm test`, and `npm run build` before release. After changing Firestore rules, deploy them and run `npm run test:integration:firebase`; the live test creates two temporary accounts, proves cross-tenant access is denied and evidence is immutable, then deletes its test records and accounts.
+
+Use the [isolated Firestore order-lock suite](scripts/FIRESTORE_ORDER_LOCK_TESTS.md) to test direct client writes and edit/order races locally without credentials or live data. Its passing result does not verify deployment; keep `FIRESTORE_RULES_VERIFIED=false` until the current rules pass target-environment acceptance.
+
 - [ARCHITECTURE.md](ARCHITECTURE.md)
 - [ROADMAP.md](ROADMAP.md)
 - [research/SUPPLIER_MATRIX.md](research/SUPPLIER_MATRIX.md)
+
+## SEO and AI-search research
+
+- [SEO and AI-search research brief](research/SEO_AI_SEARCH.md): primary-source findings and measurement limitations. Customer-site diagnostics, evidence-backed recommendations, Google/Bing report imports, and AI referral/conversion tracking are [committed scope](PRODUCT_SPEC.md#committed-remaining-scope-customer-seo-and-ai-search-engagement); the expanded scope is not complete and contains no ranking guarantees.
+- The first diagnostic slice is implemented under **Brand Intelligence → Customer-site diagnostics** for saved projects. Explicit authorization queues a bounded public-site inspection; reports and evidence downloads retain their limitations and always label engine index inclusion **not checked**. Firebase Admin, deployed `siteDiagnosticJobs.status` collection-group indexing, and the scheduler are required. See [OPERATIONS.md](OPERATIONS.md#customer-site-diagnostics). Owner-authorized acceptance, real engine indexing evidence, content recommendations, report imports and referral/conversion tracking remain outstanding.

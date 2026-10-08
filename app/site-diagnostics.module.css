@@ -1,0 +1,46 @@
+.panel { grid-column: 1 / -1; }
+.body { padding: 18px; font-size: 12px; line-height: 1.65; }
+.body > p { color: var(--muted); margin-top: 0; }
+.consent { display: flex; align-items: flex-start; gap: 10px; max-width: 780px; margin: 18px 0 12px; }
+.consent input { margin-top: 4px; accent-color: var(--violet); flex-shrink: 0; }
+.actions, .filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.actions button { margin-top: 0; }
+.actions button:disabled { opacity: .5; }
+.notice, .empty { display: grid; gap: 5px; margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.notice span, .empty p, .reportHeading p { color: var(--muted); margin: 0; }
+.error { color: #ffb0b3 !important; margin-top: 16px !important; }
+.reportHeading { display: flex; justify-content: space-between; align-items: start; gap: 16px; margin: 26px 0 18px; }
+.reportHeading h3 { margin: 0 0 7px; font-size: 17px; font-weight: 600; }
+.indexStatus { padding: 5px 9px; border: 1px solid var(--line); border-radius: 5px; color: var(--amber); white-space: nowrap; }
+.scope { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0 0 22px; }
+.scope > div { padding: 12px; background: var(--surface-2); border-radius: 6px; }
+.scope dt { color: var(--muted); font-size: 10px; }
+.scope dd { margin: 4px 0 0; font-size: 13px; }
+.filters { margin-bottom: 12px; }
+.filters button[aria-pressed="true"] { border-color: var(--violet-bright); background: #31205a; }
+.findings { display: grid; gap: 10px; }
+.finding { padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
+.findingTitle { display: flex; justify-content: space-between; align-items: start; gap: 10px; margin-bottom: 5px; }
+.findingTitle strong { text-transform: capitalize; font-weight: 600; }
+.findingTitle span { color: var(--muted); white-space: nowrap; font-size: 11px; }
+.findingTitle [data-result="pass"] { color: var(--green); }
+.findingTitle [data-result="issue"] { color: var(--amber); }
+.finding p { margin: 7px 0; }
+.finding small, .snapshot small { color: var(--muted); }
+.body code { overflow-wrap: anywhere; font-size: 11px; }
+.body details { margin-top: 10px; }
+.body summary { cursor: pointer; color: var(--violet-bright); }
+.body summary:focus-visible { outline: 2px solid var(--violet-bright); outline-offset: 3px; }
+.snapshot { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.snapshot pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: var(--bg); font-size: 10px; }
+.snapshot small { overflow-wrap: anywhere; }
+.limitations { padding-top: 10px; color: var(--muted); }
+.limitations li { margin-bottom: 7px; }
+@media (max-width: 760px) {
+  .panel { scroll-margin-top: 84px; }
+  .body { padding: 14px; }
+  .reportHeading { flex-direction: column; }
+  .scope { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .findingTitle { flex-direction: column; gap: 3px; }
+  .actions button { min-height: 40px; }
+}

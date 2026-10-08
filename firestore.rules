@@ -26,6 +26,18 @@ service cloud.firestore {
       return isMember(workspaceId) && memberRole(workspaceId) in ['owner', 'admin'];
     }
 
+    // Orders are server-owned and permanent, including cancellations/refunds.
+    // Check the document independently of project state: deleting/recreating a
+    // parent must never unlock evidence that an existing order relies on.
+    function projectIsEditable(workspaceId, projectId) {
+      let project = /databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId);
+      return !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId)/orders/current)
+        && (!exists(project) || (
+          !(get(project).data.get('campaignStatus', '') in ['awaiting_payment', 'fulfillment'])
+          && !(get(project).data.get('lifecycleStatus', '') in ['awaiting_payment', 'fulfillment'])
+        ));
+    }
+
     match /users/{userId} {
       allow read, create, update: if signedIn() && request.auth.uid == userId;
       allow delete: if false;
@@ -56,51 +68,59 @@ service cloud.firestore {
       match /projects/{projectId} {
         allow read: if isMember(workspaceId);
         allow create: if canEdit(workspaceId)
+          && projectIsEditable(workspaceId, projectId)
           && request.resource.data.workspaceId == workspaceId
           && request.resource.data.createdBy == request.auth.uid
           && request.resource.data.lifecycleStatus in ['evidence_review', 'approved', 'draft_ready', 'campaign_approved', 'awaiting_payment', 'fulfillment'];
         allow update: if canEdit(workspaceId)
+          && projectIsEditable(workspaceId, projectId)
           && request.resource.data.workspaceId == resource.data.workspaceId
           && request.resource.data.createdBy == resource.data.createdBy
           && request.resource.data.lifecycleStatus in ['evidence_review', 'approved', 'draft_ready', 'campaign_approved', 'awaiting_payment', 'fulfillment'];
-        allow delete: if canAdmin(workspaceId);
+        allow delete: if canAdmin(workspaceId) && projectIsEditable(workspaceId, projectId);
 
         match /profiles/{profileId} {
           allow read: if isMember(workspaceId);
-          allow create, update: if canEdit(workspaceId);
+          allow create, update: if canEdit(workspaceId) && projectIsEditable(workspaceId, projectId);
           allow delete: if canAdmin(workspaceId)
+            && projectIsEditable(workspaceId, projectId)
             && !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId));
         }
 
         match /evidence/{evidenceId} {
           allow read: if isMember(workspaceId);
           allow create: if canEdit(workspaceId)
+            && projectIsEditable(workspaceId, projectId)
             && request.resource.data.id == evidenceId
             && request.resource.data.url is string
             && request.resource.data.contentHash is string;
           allow update: if false;
           allow delete: if canAdmin(workspaceId)
+            && projectIsEditable(workspaceId, projectId)
             && !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId));
         }
 
         match /claims/{claimId} {
           allow read: if isMember(workspaceId);
           allow create, update: if canEdit(workspaceId)
+            && projectIsEditable(workspaceId, projectId)
             && request.resource.data.id == claimId;
           allow delete: if canAdmin(workspaceId)
+            && projectIsEditable(workspaceId, projectId)
             && !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId));
         }
 
         match /campaigns/{campaignId} {
           allow read: if isMember(workspaceId);
-          allow create, update: if canEdit(workspaceId);
-          allow delete: if canAdmin(workspaceId);
+          allow create, update: if canEdit(workspaceId) && projectIsEditable(workspaceId, projectId);
+          allow delete: if canAdmin(workspaceId) && projectIsEditable(workspaceId, projectId);
 
           match /versions/{versionId} {
             allow read: if isMember(workspaceId);
-            allow create: if canEdit(workspaceId);
+            allow create: if canEdit(workspaceId) && projectIsEditable(workspaceId, projectId);
             allow update: if false;
             allow delete: if canAdmin(workspaceId)
+              && projectIsEditable(workspaceId, projectId)
               && !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId));
           }
         }

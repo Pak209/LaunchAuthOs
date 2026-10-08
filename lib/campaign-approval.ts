@@ -51,10 +51,14 @@ export async function attestCampaignApproval(
   const currentCampaign = project.collection("campaigns").doc("current");
   const digest = campaignDigest(campaign);
   await db.runTransaction(async (transaction) => {
-    const [projectSnapshot, campaignSnapshot] = await Promise.all([
-      transaction.get(project), transaction.get(currentCampaign),
+    const [projectSnapshot, campaignSnapshot, order] = await Promise.all([
+      transaction.get(project), transaction.get(currentCampaign), transaction.get(project.collection("orders").doc("current")),
     ]);
     if (!projectSnapshot.exists || projectSnapshot.data()?.createdBy !== uid) throw new Error("The project was not found.");
+    const projectData = projectSnapshot.data();
+    if (order.exists || [projectData?.campaignStatus, projectData?.lifecycleStatus].some((status) => status === "awaiting_payment" || status === "fulfillment")) {
+      throw new Error("This project has a fulfillment order. Its approval can no longer change.");
+    }
     const current = campaignSnapshot.data() as CampaignDraft | undefined;
     // Approval is a separate server write after the customer revision. An edit,
     // generation or restore can win between those writes; never attest an old

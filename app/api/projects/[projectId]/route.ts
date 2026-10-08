@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { loadProject, updateProjectCampaign } from "@/lib/persistence";
+import { loadProject, ProjectMutationConflictError, updateProjectCampaign } from "@/lib/persistence";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getAuthenticatedFirebaseContext } from "@/lib/firebase/server";
 import { assertSameOrigin } from "@/lib/request-security";
@@ -74,11 +74,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
     }
     const body = bodySchema.parse(await request.json());
     const { db, user } = await getAuthenticatedFirebaseContext();
-    await updateProjectCampaign(db, user, rawProjectId, body.profile, body.claims, body.status);
-    return NextResponse.json({ persistence: "saved", status: body.status === "campaign" ? "draft_ready" : body.status });
+    const saved = await updateProjectCampaign(db, user, rawProjectId, body.profile, body.claims, body.status);
+    return NextResponse.json({ persistence: "saved", status: saved.campaignStatus, saved });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to update the project.";
-    const status = error instanceof z.ZodError ? 400 : 500;
+    const status = error instanceof z.ZodError ? 400 : error instanceof ProjectMutationConflictError ? 409 : message.includes("Authentication") ? 401 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

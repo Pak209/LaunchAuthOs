@@ -202,6 +202,18 @@ describe("durable intelligence jobs", () => {
     await expect(enqueueIntelligenceJob(db.asFirestore(), userId, { type: "analysis", url: companyUrl })).rejects.toThrow("fulfillment order");
   });
 
+  it("rejects enqueue replay for an existing job once an order appears", async () => {
+    const db = database(true);
+    const job = await enqueueIntelligenceJob(db.asFirestore(), userId, { type: "campaign_generation", projectId }, initialTime);
+    db.seed(`${projectPath}/orders/current`, { status: "refunded" });
+    await expect(enqueueIntelligenceJob(db.asFirestore(), userId, { type: "campaign_generation", projectId })).rejects.toThrow("fulfillment order");
+    const generate = vi.fn(async () => generated());
+    await runQueuedIntelligenceJobs(db.asFirestore(), { generate, now: () => initialTime });
+    expect(generate).not.toHaveBeenCalled();
+    expect(db.read(jobPath(job.id)).status).toBe("superseded");
+    expect(db.read(campaignPath).version).toBe(1);
+  });
+
   it("checks membership again before executing persisted work", async () => {
     const db = database();
     const job = await enqueueIntelligenceJob(db.asFirestore(), userId, { type: "analysis", url: companyUrl }, initialTime);

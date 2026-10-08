@@ -80,13 +80,13 @@ export async function enqueueIntelligenceJob(db: Firestore, userId: string, inpu
     assertMember(member.data(), userId);
     const project = projectSnapshot.data() as ProjectData | undefined;
     assertProjectOwner(project, userId, target.workspaceId);
+    if (order.exists) throw new Error("This project already has a fulfillment order. Create a new project for a new campaign.");
     const activeId = lockSnapshot.data()?.jobId;
     const active = typeof activeId === "string" ? (await transaction.get(target.workspace.collection("intelligenceJobs").doc(activeId))).data() as IntelligenceJob | undefined : undefined;
     if (active && activeStatuses.has(active.status)) {
       if (active.type !== input.type) throw new Error("Wait for the current project job to finish before starting another operation.");
       return publicIntelligenceJob(active);
     }
-    if (order.exists) throw new Error("This project already has a fulfillment order. Create a new project for a new campaign.");
     if (input.type === "campaign_generation") {
       if (!project) throw new Error("Project not found.");
       assertApproved(project);

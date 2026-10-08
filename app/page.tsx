@@ -9,9 +9,12 @@ import {
 } from "@phosphor-icons/react";
 import type { AnalysisResult, CampaignDraft, Claim, FindingKind, FulfillmentState, PersistedAnalysisResult, ProjectSummary } from "@/lib/types";
 import { CampaignHistory } from "./campaign-history";
+import SiteDiagnostics from "./site-diagnostics";
 import type { IntelligenceJobStatus } from "@/lib/intelligence-jobs";
 import { canApplyIntelligenceResult, intelligenceJobHost } from "@/lib/intelligence-client";
 import { publicEvidenceLink, summarizeFulfillment } from "@/lib/fulfillment-summary";
+import { canApplyEditorResponse, editorChanges, editorSnapshot, localDraftMarkdown, type EditorSnapshot } from "@/lib/editor-conflict";
+import { evidenceSaveBaseline, mergeEvidenceSave, type EvidenceSaveOutcome } from "@/lib/evidence-save-state";
 import {
   AuthorityGraph, AuthorityScore, CampaignAsset, CampaignTimeline,
   DistributionProgress, EvidenceBadge, MetricCard, OpportunityCard, PackageCard, PlacementCard,
@@ -67,14 +70,14 @@ function AppShell({ activeView, setActiveView, hasIntelligence, children }: { ac
   );
 }
 
-function TopBar({ activeView, hasIntelligence, persistence, canSignOut, projects, projectId, selectProject, newProject }: { activeView: View; hasIntelligence: boolean; persistence?: "local" | "saved"; canSignOut: boolean; projects: ProjectSummary[]; projectId?: string; selectProject: (id: string) => void; newProject: () => void }) {
+function TopBar({ activeView, hasIntelligence, persistence, localDraft, canSignOut, projects, projectId, selectProject, newProject }: { activeView: View; hasIntelligence: boolean; persistence?: "local" | "saved"; localDraft: boolean; canSignOut: boolean; projects: ProjectSummary[]; projectId?: string; selectProject: (id: string) => void; newProject: () => void }) {
   return (
     <header className="topbar">
       <div><h1>{activeView}</h1><p>{activeView === "Command Center" ? "Outcome-first overview. Understand momentum at a glance." : "Launch intelligence grounded in verified evidence."}</p></div>
       <div className="topbar-actions">
         {projects.length ? <select className="project-switcher" aria-label="Current project" value={projectId ?? ""} onChange={(event) => selectProject(event.target.value)}><option value="" disabled>Select project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select> : null}
         {projects.length ? <button className="mode-button" onClick={newProject}>New project</button> : null}
-        <EvidenceBadge state={hasIntelligence ? (persistence === "saved" ? "SAVED WORKSPACE" : "LOCAL ANALYSIS") : "GETTING STARTED"} tone={hasIntelligence && persistence === "saved" ? "positive" : "neutral"} />
+        <EvidenceBadge state={hasIntelligence ? (localDraft ? "LOCAL DRAFT" : persistence === "saved" ? "SAVED WORKSPACE" : "LOCAL ANALYSIS") : "GETTING STARTED"} tone={hasIntelligence && persistence === "saved" && !localDraft ? "positive" : "neutral"} />
         <button className="mode-button intelligence"><Brain size={15} /> Intelligence</button>
         <button className="mode-button authority"><ShieldCheck size={15} /> Authority</button>
         {canSignOut ? <form action="/auth/signout" method="post"><button className="profile-avatar" title="Sign out" aria-label="Sign out"><SignOut size={17} /></button></form> : null}
@@ -83,15 +86,15 @@ function TopBar({ activeView, hasIntelligence, persistence, canSignOut, projects
   );
 }
 
-function IntelligenceInput({ url, setUrl, submit, status, error }: { url: string; setUrl: (url: string) => void; submit: (event: FormEvent) => void; status: string; error: string }) {
+function IntelligenceInput({ url, setUrl, submit, status, error, orderLocked }: { url: string; setUrl: (url: string) => void; submit: (event: FormEvent) => void; status: string; error: string; orderLocked: boolean }) {
   return (
     <section className="intelligence-input">
       <div className="input-copy"><Target size={19} weight="duotone" /><div><strong>Analyze company intelligence</strong><span>Start with a public URL. Every result must retain its source.</span></div></div>
       <form onSubmit={submit}>
         <label className="sr-only" htmlFor="company-url">Company URL</label>
         <MagnifyingGlass size={17} />
-        <input id="company-url" type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://yourcompany.com" autoComplete="url" spellCheck={false} required />
-        <button type="submit" disabled={status === "loading"}>{status === "loading" ? "Analyzing…" : "Run intelligence"}<ArrowRight size={14} /></button>
+        <input disabled={orderLocked} id="company-url" type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://yourcompany.com" autoComplete="url" spellCheck={false} required />
+        <button type="submit" disabled={status === "loading" || orderLocked}>{status === "loading" ? "Analyzing…" : "Run intelligence"}<ArrowRight size={14} /></button>
       </form>
       {error ? <p className="input-error" role="alert">{error}</p> : null}
     </section>
@@ -212,27 +215,27 @@ const findingKinds: Array<{ kind: FindingKind; label: string }> = [
   { kind: "competitor", label: "Competitors" },
 ];
 
-function BrandIntelligence({ result, claims, editClaim, editProfile, editFinding, addFinding, saveEvidence, saveState }: { result: PersistedAnalysisResult | null; claims: Claim[]; editClaim: (id: string, text: string) => void; editProfile: (field: "company" | "product" | "audience" | "positioning", value: string) => void; editFinding: (kind: FindingKind, id: string, value: string) => void; addFinding: (kind: FindingKind) => void; saveEvidence: () => void; saveState: "idle" | "saving" | "saved" | "failed" }) {
+function BrandIntelligence({ result, claims, editClaim, editProfile, editFinding, addFinding, saveEvidence, saveState, orderLocked }: { result: PersistedAnalysisResult | null; claims: Claim[]; editClaim: (id: string, text: string) => void; editProfile: (field: "company" | "product" | "audience" | "positioning", value: string) => void; editFinding: (kind: FindingKind, id: string, value: string) => void; addFinding: (kind: FindingKind) => void; saveEvidence: () => void; saveState: "idle" | "saving" | "saved" | "failed"; orderLocked: boolean }) {
   if (!result) return <EmptyIntelligence title="No company intelligence yet" body="Run intelligence from the Command Center to build a source-backed brand model." />;
   return (
     <div className="brand-intelligence-layout">
       <section className="surface profile-editor">
-        <div className="surface-heading"><div><span>Editable company profile</span><small>Corrections autosave and become founder-provided evidence</small></div><EvidenceBadge state={saveState === "saving" ? "SAVING" : saveState === "failed" ? "SAVE FAILED" : saveState === "saved" ? "SAVED" : "READY"} tone={saveState === "failed" ? "warning" : saveState === "saved" ? "positive" : "neutral"} /></div>
+        <div className="surface-heading"><div><span>{orderLocked ? "Company profile" : "Editable company profile"}</span><small>{orderLocked ? "Evidence is read-only while edits are locked" : "Corrections autosave and become founder-provided evidence"}</small></div><EvidenceBadge state={orderLocked ? "READ ONLY" : saveState === "saving" ? "SAVING" : saveState === "failed" ? "SAVE FAILED" : saveState === "saved" ? "SAVED" : "READY"} tone={saveState === "failed" ? "warning" : saveState === "saved" ? "positive" : "neutral"} /></div>
         <div className="profile-fields">
-          <label>Company<input value={result.profile.company} onChange={(event) => editProfile("company", event.target.value)} /></label>
-          <label>Product<input value={result.profile.product} onChange={(event) => editProfile("product", event.target.value)} /></label>
-          <label>Audience<textarea value={result.profile.audience} onChange={(event) => editProfile("audience", event.target.value)} /></label>
-          <label>Positioning<textarea value={result.profile.positioning} onChange={(event) => editProfile("positioning", event.target.value)} /></label>
+          <label>Company<input disabled={orderLocked} value={result.profile.company} onChange={(event) => editProfile("company", event.target.value)} /></label>
+          <label>Product<input disabled={orderLocked} value={result.profile.product} onChange={(event) => editProfile("product", event.target.value)} /></label>
+          <label>Audience<textarea disabled={orderLocked} value={result.profile.audience} onChange={(event) => editProfile("audience", event.target.value)} /></label>
+          <label>Positioning<textarea disabled={orderLocked} value={result.profile.positioning} onChange={(event) => editProfile("positioning", event.target.value)} /></label>
         </div>
       </section>
       <section className="surface structured-findings">
         <div className="surface-heading"><div><span>Structured findings</span><small>Every finding includes confidence, freshness, and an immutable evidence snapshot</small></div><EvidenceBadge state={`${Object.values(result.profile.findings).flat().length} FINDINGS`} tone="accent" /></div>
-        <div className="finding-groups">{findingKinds.map(({ kind, label }) => <div className="finding-group" key={kind}><div className="finding-group-title"><strong>{label}</strong><button onClick={() => addFinding(kind)}>Add</button></div>{result.profile.findings[kind].length ? result.profile.findings[kind].map((finding) => <div className="finding-row" key={finding.id}><textarea aria-label={`Edit ${label} finding`} value={finding.value} onChange={(event) => editFinding(kind, finding.id, event.target.value)} /><span>{Math.round(finding.confidence * 100)}% confidence<br />Observed {new Date(finding.observedAt).toLocaleDateString()}</span><a href={finding.sourceUrl} target="_blank" rel="noreferrer">Source</a></div>) : <p>No public finding yet.</p>}</div>)}</div>
+        <div className="finding-groups">{findingKinds.map(({ kind, label }) => <div className="finding-group" key={kind}><div className="finding-group-title"><strong>{label}</strong><button disabled={orderLocked} onClick={() => addFinding(kind)}>Add</button></div>{result.profile.findings[kind].length ? result.profile.findings[kind].map((finding) => <div className="finding-row" key={finding.id}><textarea disabled={orderLocked} aria-label={`Edit ${label} finding`} value={finding.value} onChange={(event) => editFinding(kind, finding.id, event.target.value)} /><span>{Math.round(finding.confidence * 100)}% confidence<br />Observed {new Date(finding.observedAt).toLocaleDateString()}</span><a href={finding.sourceUrl} target="_blank" rel="noreferrer">Source</a></div>) : <p>No public finding yet.</p>}</div>)}</div>
       </section>
       <section className="surface intelligence-claims">
         <div className="surface-heading"><div><span>Approved claims</span><small>Each claim retains its source and approval state</small></div><EvidenceBadge state={`${claims.filter((claim) => claim.approved).length}/${claims.length} APPROVED`} tone="neutral" /></div>
-        {claims.map((claim) => <div className="intelligence-claim" key={claim.id}><EvidenceBadge state={claim.state} tone={claim.state === "VERIFIED" ? "positive" : "warning"} /><textarea aria-label={`Edit claim: ${claim.text}`} value={claim.text} onChange={(event) => editClaim(claim.id, event.target.value)} /><a href={claim.sourceUrl} target="_blank" rel="noreferrer">View source <ArrowRight size={12} /></a></div>)}
-        <div className="evidence-save"><button className="secondary-button" onClick={saveEvidence}>{saveState === "saving" ? "Saving…" : result.persistence === "saved" ? "Save now" : "Apply evidence edits locally"}</button><span>Edits autosave after a short pause. Edited source claims become assumed until reviewed and approved.</span></div>
+        {claims.map((claim) => <div className="intelligence-claim" key={claim.id}><EvidenceBadge state={claim.state} tone={claim.state === "VERIFIED" ? "positive" : "warning"} /><textarea disabled={orderLocked} aria-label={`Edit claim: ${claim.text}`} value={claim.text} onChange={(event) => editClaim(claim.id, event.target.value)} /><a href={claim.sourceUrl} target="_blank" rel="noreferrer">View source <ArrowRight size={12} /></a></div>)}
+        <div className="evidence-save"><button className="secondary-button" disabled={orderLocked || saveState === "saving"} onClick={saveEvidence}>{saveState === "saving" ? "Saving…" : result.persistence === "saved" ? "Save now" : "Apply evidence edits locally"}</button><span>{orderLocked ? "Saved evidence and source links remain available for review." : "Edits autosave after a short pause. Edited source claims become assumed until reviewed and approved."}</span></div>
       </section>
       <section className="surface missing-intelligence">
         <div className="surface-heading"><div><span>Missing intelligence</span><small>What the system still needs before paid distribution</small></div></div>
@@ -242,11 +245,12 @@ function BrandIntelligence({ result, claims, editClaim, editProfile, editFinding
         <div className="surface-heading"><div><span>Observed source pages</span><small>Bounded, same-origin crawl evidence</small></div><EvidenceBadge state={`${result.sources?.length ?? 1} SOURCES`} tone="positive" /></div>
         <div className="source-grid">{(result.sources ?? []).map((source) => <a href={source.url} target="_blank" rel="noreferrer" key={source.id}><GlobeHemisphereWest size={17} weight="duotone" /><span><strong>{source.title || new URL(source.url).pathname}</strong><small>{new URL(source.url).pathname || "/"} · captured {new Date(source.capturedAt).toLocaleDateString()}</small></span><ArrowRight size={12} /></a>)}</div>
       </section>
+      <SiteDiagnostics projectId={result.persistence === "saved" ? result.projectId : undefined} />
     </div>
   );
 }
 
-function CampaignStudio({ result, claims, toggleClaim, approvable, status, approve, generate, editAsset, saveAssets, exportAssets, generationStatus, fulfillmentStarted, onRestored, onRestoreBusy }: { result: PersistedAnalysisResult | null; claims: Claim[]; toggleClaim: (id: string) => void; approvable: boolean; status: string; approve: () => void; generate: () => void; editAsset: (id: string, field: "title" | "content", value: string) => void; saveAssets: (status: "draft" | "approved") => void; exportAssets: () => void; generationStatus: "idle" | "generating" | "saving"; fulfillmentStarted: boolean; onRestored: (campaign: CampaignDraft) => void; onRestoreBusy: (busy: boolean) => void }) {
+function CampaignStudio({ result, claims, toggleClaim, approvable, status, approve, generate, editAsset, saveAssets, exportAssets, draftExport, generationStatus, evidenceSaving, orderLocked, onRestored, onRestoreBusy }: { result: PersistedAnalysisResult | null; claims: Claim[]; toggleClaim: (id: string) => void; approvable: boolean; status: string; approve: () => void; generate: () => void; editAsset: (id: string, field: "title" | "content", value: string) => void; saveAssets: (status: "draft" | "approved") => void; exportAssets: () => void; draftExport: boolean; generationStatus: "idle" | "generating" | "saving"; evidenceSaving: boolean; orderLocked: boolean; onRestored: (campaign: CampaignDraft) => void; onRestoreBusy: (busy: boolean) => void }) {
   if (!result) return <EmptyIntelligence title="Campaign intelligence is waiting" body="Analyze a company first. Launch Auth will turn verified facts into a defensible campaign narrative." />;
   const campaign = result.campaign;
   const generated = Boolean(campaign);
@@ -259,23 +263,23 @@ function CampaignStudio({ result, claims, toggleClaim, approvable, status, appro
       </section>
       <section className="surface claim-review">
         <div className="surface-heading"><div><span>Claim approval</span><small>No paid or generated campaign action can outrun approved evidence.</small></div><EvidenceBadge state={`${claims.filter((claim) => claim.approved).length}/${claims.length} REVIEWED`} tone={approvable ? "positive" : "warning"} /></div>
-        {claims.map((claim) => <label className="premium-claim" key={claim.id}><input type="checkbox" checked={claim.approved} onChange={() => toggleClaim(claim.id)} /><span className="check-control"><Check size={12} /></span><div><strong>{claim.text}</strong><a href={claim.sourceUrl} target="_blank" rel="noreferrer">{new URL(claim.sourceUrl).hostname} <ArrowRight size={11} /></a></div><EvidenceBadge state={claim.state} tone={claim.state === "VERIFIED" ? "positive" : "warning"} /></label>)}
-        <div className="review-actions"><button className="primary-button" disabled={!approvable || status === "approved" || generationStatus !== "idle" || fulfillmentStarted} onClick={approve}>Approve claims <Check size={14} /></button><span>Approval unlocks campaign generation.</span></div>
+        {claims.map((claim) => <label className="premium-claim" key={claim.id}><input disabled={orderLocked} type="checkbox" checked={claim.approved} onChange={() => toggleClaim(claim.id)} /><span className="check-control"><Check size={12} /></span><div><strong>{claim.text}</strong><a href={claim.sourceUrl} target="_blank" rel="noreferrer">{new URL(claim.sourceUrl).hostname} <ArrowRight size={11} /></a></div><EvidenceBadge state={claim.state} tone={claim.state === "VERIFIED" ? "positive" : "warning"} /></label>)}
+        <div className="review-actions"><button className="primary-button" disabled={!approvable || status === "approved" || generationStatus !== "idle" || orderLocked} onClick={approve}>Approve claims <Check size={14} /></button><span>{orderLocked ? "Claim approvals are read-only while edits are locked." : "Approval unlocks campaign generation."}</span></div>
       </section>
       {campaign ? <section className="surface campaign-editor">
-        <div className="surface-heading"><div><span>Campaign asset editor</span><small>Version {campaign.version} · {campaign.model} · generated {new Date(campaign.generatedAt).toLocaleString()}</small></div><EvidenceBadge state={campaign.status} tone={campaign.status === "approved" ? "positive" : "accent"} /></div>
-        <div className="campaign-editor-assets">{campaign.assets.map((asset) => <label key={asset.id}><span><input disabled={generationStatus !== "idle" || fulfillmentStarted} aria-label={`Edit ${asset.type} title`} value={asset.title} onChange={(event) => editAsset(asset.id, "title", event.target.value)} /><small>{asset.claimIds.length} approved evidence reference{asset.claimIds.length === 1 ? "" : "s"}{asset.type === "press_release" ? ` · ${asset.content.split(/\s+/).filter(Boolean).length} words` : ""}</small></span><textarea disabled={generationStatus !== "idle" || fulfillmentStarted} value={asset.content} aria-label={`Edit ${asset.title}`} onChange={(event) => editAsset(asset.id, "content", event.target.value)} /></label>)}</div>
-        <div className="campaign-editor-actions"><button className="secondary-button" disabled={generationStatus !== "idle"} onClick={() => saveAssets("draft")}>Save new version</button><button className="primary-button" disabled={generationStatus !== "idle"} onClick={() => saveAssets("approved")}>Approve campaign</button><button className="secondary-button" onClick={exportAssets}>Download assets</button><button className="secondary-button" disabled={generationStatus !== "idle"} onClick={generate}>Regenerate</button></div>
+        <div className="surface-heading"><div><span>Campaign asset editor</span><small>Version {campaign.version} · {campaign.model} · generated {new Date(campaign.generatedAt).toLocaleString()}{draftExport ? " · Local preview, not the ordered content" : ""}</small></div><EvidenceBadge state={draftExport ? "LOCAL DRAFT" : campaign.status} tone={!draftExport && campaign.status === "approved" ? "positive" : "accent"} /></div>
+        <div className="campaign-editor-assets">{campaign.assets.map((asset) => <label key={asset.id}><span><input disabled={generationStatus !== "idle" || orderLocked} aria-label={`Edit ${asset.type} title`} value={asset.title} onChange={(event) => editAsset(asset.id, "title", event.target.value)} /><small>{asset.claimIds.length} approved evidence reference{asset.claimIds.length === 1 ? "" : "s"}{asset.type === "press_release" ? ` · ${asset.content.split(/\s+/).filter(Boolean).length} words` : ""}</small></span><textarea disabled={generationStatus !== "idle" || orderLocked} value={asset.content} aria-label={`Edit ${asset.title}`} onChange={(event) => editAsset(asset.id, "content", event.target.value)} /></label>)}</div>
+        <div className="campaign-editor-actions"><button className="secondary-button" disabled={generationStatus !== "idle" || orderLocked} onClick={() => saveAssets("draft")}>Save new version</button><button className="primary-button" disabled={generationStatus !== "idle" || orderLocked} onClick={() => saveAssets("approved")}>Approve campaign</button><button className="secondary-button" onClick={exportAssets}>{draftExport ? "Download local draft" : "Download saved assets"}</button><button className="secondary-button" disabled={generationStatus !== "idle" || orderLocked} onClick={generate}>Regenerate</button></div>
       </section> : <div className="asset-grid">
         {["Press Release", "Headlines", "Founder Quotes", "Company Boilerplate", "Social Posts", "Directory Copy", "FAQ", "Structured Data"].map((asset, index) => <CampaignAsset key={asset} name={asset} icon={index === 0 ? FileText : index < 4 ? Megaphone : index < 6 ? PaperPlaneTilt : ListChecks} state="LOCKED" />)}
       </div>}
-      {result.projectId && campaign ? <CampaignHistory key={`${result.projectId}:${campaign.version}`} projectId={result.projectId} currentVersion={campaign.version} disabled={generationStatus !== "idle" || fulfillmentStarted} onRestored={onRestored} onRestoreBusy={onRestoreBusy} /> : null}
-      <div className="studio-generate"><button className="primary-button" disabled={(!generated && status !== "approved") || generationStatus !== "idle"} onClick={generate}>{generationStatus === "generating" ? "Generating evidence-bound assets…" : generated ? "Regenerate campaign" : "Build campaign draft"}<ArrowRight size={14} /></button>{generated ? <p role="status"><Check size={15} /> Save and approve the reviewed campaign before preparing fulfillment.</p> : <p>Approve evidence before generation.</p>}</div>
+      {result.projectId && campaign ? <CampaignHistory key={`${result.projectId}:${campaign.version}`} projectId={result.projectId} currentVersion={campaign.version} disabled={generationStatus !== "idle" || evidenceSaving || orderLocked} onRestored={onRestored} onRestoreBusy={onRestoreBusy} /> : null}
+      <div className="studio-generate"><button className="primary-button" disabled={(!generated && status !== "approved") || generationStatus !== "idle" || orderLocked} onClick={generate}>{generationStatus === "generating" ? "Generating evidence-bound assets…" : generated ? "Regenerate campaign" : "Build campaign draft"}<ArrowRight size={14} /></button>{orderLocked ? <p>Campaign editing and restoration are unavailable. Saved history, previews, and downloads remain available.</p> : generated ? <p role="status"><Check size={15} /> Save and approve the reviewed campaign before preparing fulfillment.</p> : <p>Approve evidence before generation.</p>}</div>
     </div>
   );
 }
 
-function DistributionCenter({ result, fulfillment, prepare, loading }: { result: PersistedAnalysisResult | null; fulfillment: FulfillmentState | null; prepare: (details: DistributionDetails) => void; loading: boolean }) {
+function DistributionCenter({ result, fulfillment, prepare, loading, orderLocked }: { result: PersistedAnalysisResult | null; fulfillment: FulfillmentState | null; prepare: (details: DistributionDetails) => void; loading: boolean; orderLocked: boolean }) {
   const [country, setCountry] = useState("United States");
   const [packageId, setPackageId] = useState<DistributionDetails["packageId"]>("launch");
   const [city, setCity] = useState("");
@@ -303,7 +307,7 @@ function DistributionCenter({ result, fulfillment, prepare, loading }: { result:
           ["Placement URL monitoring", fulfillment ? summary.monitoring.toUpperCase() : "UNAVAILABLE", summary.verificationProblems ? "warning" : "neutral"],
         ].map(([label, state, tone]) => <div className="timeline-row" key={label}><span className="timeline-icon"><Check size={13} /></span><strong>{label}</strong><EvidenceBadge state={state} tone={tone as "neutral" | "warning"} /></div>)}
       </section>
-      {!fulfillment?.order ? <form className="surface fulfillment-prepare" onSubmit={(event) => {
+      {!orderLocked ? <form className="surface fulfillment-prepare" onSubmit={(event) => {
         event.preventDefault();
         prepare({ packageId, country: country.trim(), city: city.trim(), categories: categories.split(",").map((value) => value.trim()).filter(Boolean), contactName: contactName.trim(), contactEmail: contactEmail.trim() });
       }}><ShieldCheck size={22} weight="duotone" /><div className="fulfillment-copy"><strong>Prepare fulfillment safely</strong><p>Choose the customer package and confirm the dateline, categories, and authorized media contact. The supplier plan, cost, credits, and Stripe package become one immutable order.</p></div><div className="distribution-intake-fields"><label><span>Package</span><select value={packageId} onChange={(event) => setPackageId(event.target.value as DistributionDetails["packageId"])}><option value="launch">Launch</option><option value="authority">Authority</option><option value="authority_plus">Authority+</option></select></label><label><span>Country</span><input required minLength={2} maxLength={120} value={country} onChange={(event) => setCountry(event.target.value)} /></label><label><span>City</span><input required maxLength={120} placeholder="Dateline city" value={city} onChange={(event) => setCity(event.target.value)} /></label><label><span>Categories</span><input required placeholder="Technology, Business" value={categories} onChange={(event) => setCategories(event.target.value)} /></label><label><span>Media contact</span><input required minLength={2} maxLength={120} placeholder="Full name" value={contactName} onChange={(event) => setContactName(event.target.value)} /></label><label><span>Contact email</span><input required type="email" maxLength={254} placeholder="press@company.com" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} /></label></div><button className="primary-button" disabled={!campaignApproved || loading || !city.trim() || !categories.trim() || !contactName.trim() || !contactEmail.trim()}>{loading ? "Preparing…" : "Validate & prepare"}</button></form> : null}
@@ -356,30 +360,79 @@ export default function Home() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [autosaveRevision, setAutosaveRevision] = useState(0);
+  const [evidenceSaving, setEvidenceSaving] = useState(false);
+  const [savedEditor, setSavedEditor] = useState<EditorSnapshot | null>(null);
+  const [saveConflict, setSaveConflict] = useState<{ projectId: string; message: string } | null>(null);
+  const [projectLoading, setProjectLoading] = useState(false);
+  const [fulfillmentRefreshRevision, setFulfillmentRefreshRevision] = useState(0);
+  const changes = editorChanges(result ? editorSnapshot(result, claims) : null, savedEditor);
+  const hasLocalEdits = changes.evidence || changes.campaign;
+  const conflictMessage = saveConflict?.projectId === result?.projectId ? saveConflict?.message ?? "" : "";
   const [generationStatus, setGenerationStatus] = useState<"idle" | "generating" | "saving">("idle");
   const [fulfillmentSnapshot, setFulfillmentSnapshot] = useState<{ projectId: string; state: FulfillmentState } | null>(null);
   const fulfillment = fulfillmentSnapshot?.projectId === result?.projectId ? fulfillmentSnapshot?.state ?? null : null;
   const [fulfillmentError, setFulfillmentError] = useState("");
   const [fulfillmentLoading, setFulfillmentLoading] = useState(false);
+  // An order is immutable even after cancellation/refund. Saved projects also
+  // stay read-only until fulfillment is known, or if its latest refresh failed.
+  const orderLockMessage = projectLoading
+    ? "Loading saved content. The local editor is paused until this finishes."
+    : conflictMessage
+      ? "Saving is paused because the saved project changed. Reload saved content before editing again."
+      : fulfillment?.order || ["awaiting_payment", "fulfillment"].includes(result?.campaignStatus ?? "")
+    ? "This project's evidence and campaign are locked because fulfillment has been prepared. Cancellation or refund does not unlock edits. Saved history, previews, sources, and downloads remain available."
+    : result?.projectId && (fulfillmentLoading || !fulfillment || fulfillmentError)
+      ? fulfillmentLoading
+        ? "Evidence and campaign edits are paused while the fulfillment order is being prepared."
+        : "Evidence and campaign edits are paused until fulfillment status can be verified. Saved history, previews, sources, and downloads remain available."
+      : "";
+  const orderLocked = Boolean(orderLockMessage);
+  const requiresSavedReload = Boolean(conflictMessage || (hasLocalEdits && orderLocked));
+  const draftExport = hasLocalEdits || Boolean(conflictMessage) || result?.persistence !== "saved";
   const [billingOffers, setBillingOffers] = useState<BillingOffer[]>([]);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [intelligenceJobs, setIntelligenceJobs] = useState<IntelligenceJobStatus[]>([]);
   const [jobPollRevision, setJobPollRevision] = useState(0);
   const [jobError, setJobError] = useState("");
   const workspaceEpoch = useRef(0);
+  const editorSession = useRef(0);
+  const campaignAction = useRef<number | null>(null);
+  const evidenceRequest = useRef<{ epoch: number; session: number } | null>(null);
+  const restoreRequest = useRef<{ projectId?: string; epoch: number; session: number } | null>(null);
+  const currentProjectId = useRef<string | undefined>(undefined);
+  const observedOrderProject = useRef<string | undefined>(undefined);
+  const latestEditor = useRef({ result, claims });
+  latestEditor.current = { result, claims };
   const followedJob = useRef<{ id: string; epoch: number } | null>(null);
   const approvable = useMemo(() => claims.length > 0 && claims.every((claim) => claim.approved), [claims]);
 
   const applyProject = useCallback((project: PersistedAnalysisResult) => {
+    workspaceEpoch.current++;
+    editorSession.current++;
+    currentProjectId.current = project.projectId;
+    observedOrderProject.current = undefined;
     setResult(project);
+    setSavedEditor(editorSnapshot(project));
+    setSaveConflict(null);
+    setFulfillmentSnapshot(null);
+    setFulfillmentLoading(false);
+    setFulfillmentError("");
+    setFulfillmentRefreshRevision((revision) => revision + 1);
     setClaims(project.profile.claims);
     setUrl(project.profile.sourceUrl);
     setStatus(project.campaignStatus === "draft_ready" ? "campaign" : project.campaignStatus === "approved" ? "approved" : "ready");
     setSaveState("saved");
+    setEvidenceSaving(false);
+    evidenceRequest.current = null;
+    setAutosaveRevision(0);
+    setGenerationStatus("idle");
+    campaignAction.current = null;
+    restoreRequest.current = null;
   }, []);
 
   useEffect(() => {
     let active = true;
+    const epoch = workspaceEpoch.current;
     fetch("/api/projects", { cache: "no-store" })
       .then(async (response) => {
         if (response.status === 401) {
@@ -393,7 +446,7 @@ export default function Home() {
         return payload.project as PersistedAnalysisResult | null;
       })
       .then((project) => {
-        if (!active || !project) return;
+        if (!active || !project || workspaceEpoch.current !== epoch) return;
         applyProject(project);
       })
       .catch(() => undefined);
@@ -418,8 +471,10 @@ export default function Home() {
         const completed = followed ? jobs.find((job) => job.id === followed.id && !pendingJob(job)) : undefined;
         if (completed) {
           followedJob.current = null;
-          setGenerationStatus("idle");
-          setStatus((current) => current === "loading" ? "idle" : current);
+          if (followed?.epoch === workspaceEpoch.current) {
+            setGenerationStatus("idle");
+            setStatus((current) => current === "loading" ? "idle" : current);
+          }
           if (canApplyIntelligenceResult(completed, followed, workspaceEpoch.current)) {
             const resultResponse = await fetch(`/api/projects/${completed.projectId}`, { cache: "no-store", signal: controller.signal });
             const resultPayload = await resultResponse.json();
@@ -454,36 +509,52 @@ export default function Home() {
   }
 
   useEffect(() => {
-    if (!autosaveRevision || !result) return;
+    if (!autosaveRevision || !result || !changes.evidence || orderLocked || evidenceSaving || generationStatus !== "idle") return;
     const timer = window.setTimeout(() => void saveCampaign("evidence_review", true), 900);
     return () => window.clearTimeout(timer);
+    // Lock/project changes also cancel pending edits before they can be saved.
     // autosaveRevision intentionally represents a complete edit snapshot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autosaveRevision]);
+  }, [autosaveRevision, changes.evidence, orderLocked, evidenceSaving, generationStatus, result?.projectId]);
+
+  useEffect(() => {
+    if (!hasLocalEdits) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, [hasLocalEdits]);
 
   useEffect(() => {
     if (!result?.projectId) return;
     const projectId = result.projectId;
+    const session = editorSession.current;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     const controller = new AbortController();
-    setFulfillmentError("");
     async function refresh() {
       try {
         const response = await fetch(`/api/projects/${projectId}/fulfillment`, { cache: "no-store", signal: controller.signal });
         const payload = await response.json();
         if (response.status === 401) return void window.location.assign("/login");
         if (!response.ok) throw new Error(payload.error ?? "Unable to load fulfillment.");
-        if (active) { setFulfillmentSnapshot({ projectId, state: payload.fulfillment }); setFulfillmentError(""); }
+        if (active && currentProjectId.current === projectId && editorSession.current === session) {
+          // Invalidate any response from an edit/save begun before this tab
+          // learned that an immutable order exists.
+          if (payload.fulfillment?.order && observedOrderProject.current !== projectId) {
+            observedOrderProject.current = projectId;
+            workspaceEpoch.current++;
+          }
+          setFulfillmentSnapshot({ projectId, state: payload.fulfillment }); setFulfillmentError("");
+        }
       } catch (caught) {
-        if (active) setFulfillmentError(caught instanceof Error ? caught.message : "Unable to load fulfillment.");
+        if (active && editorSession.current === session) setFulfillmentError(caught instanceof Error ? caught.message : "Unable to load fulfillment.");
       } finally {
         if (active) timer = setTimeout(() => void refresh(), 30_000);
       }
     }
     void refresh();
     return () => { active = false; controller.abort(); clearTimeout(timer); };
-  }, [activeView, result?.projectId]);
+  }, [activeView, result?.projectId, fulfillmentRefreshRevision]);
 
   useEffect(() => {
     if (activeView !== "Packages") return;
@@ -497,8 +568,11 @@ export default function Home() {
   }, [activeView]);
 
   async function submit(event: FormEvent) {
-    event.preventDefault(); setError(""); setStatus("loading");
-    const submittedEpoch = ++workspaceEpoch.current;
+    event.preventDefault();
+    if (orderLocked) return;
+    if (hasLocalEdits && !window.confirm("Replace this tab's unsaved local edits with a new analysis? Cancel to download a local draft first.")) return;
+    setError(""); setStatus("loading");
+    const request = { projectId: result?.projectId, epoch: ++workspaceEpoch.current };
     try {
       const response = await fetch("/api/analyze", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) });
       const payload = await response.json();
@@ -506,39 +580,50 @@ export default function Home() {
         window.location.assign("/login");
         return;
       }
+      if (!canApplyEditorResponse(request, currentProjectId.current, workspaceEpoch.current)) return;
       if (!response.ok) throw new Error(payload.error ?? "Analysis failed.");
-      if (response.status === 202) return followBackgroundJob(payload.job, submittedEpoch);
+      if (response.status === 202) return followBackgroundJob(payload.job, request.epoch);
       applyProject(payload);
       if (payload.projectId) {
         const summary: ProjectSummary = { id: payload.projectId, name: payload.profile.company, url: payload.profile.sourceUrl, campaignStatus: "evidence_review", updatedAt: payload.fetchedAt };
         setProjects((current) => [summary, ...current.filter((project) => project.id !== payload.projectId)]);
       }
     } catch (caught) {
+      if (!canApplyEditorResponse(request, currentProjectId.current, workspaceEpoch.current)) return;
       setError(caught instanceof Error ? caught.message : "Analysis failed."); setStatus(result ? "ready" : "idle");
     }
   }
 
-  function toggleClaim(id: string) { workspaceEpoch.current++; setClaims((current) => current.map((claim) => claim.id === id ? { ...claim, approved: !claim.approved } : claim)); }
+  function toggleClaim(id: string) {
+    if (orderLocked) return;
+    workspaceEpoch.current++;
+    setClaims((current) => current.map((claim) => claim.id === id ? { ...claim, approved: !claim.approved } : claim));
+    setStatus("ready"); setSaveState("idle"); setAutosaveRevision((revision) => revision + 1);
+  }
 
   function editClaim(id: string, text: string) {
+    if (orderLocked) return;
     workspaceEpoch.current++;
     setClaims((current) => current.map((claim) => claim.id === id ? { ...claim, text, state: "ASSUMED", approved: false } : claim));
     setStatus("ready"); setSaveState("idle"); setAutosaveRevision((revision) => revision + 1);
   }
 
   function editProfile(field: "company" | "product" | "audience" | "positioning", value: string) {
+    if (orderLocked) return;
     workspaceEpoch.current++;
     setResult((current) => current ? { ...current, profile: { ...current.profile, [field]: value } } : current);
     setStatus("ready"); setSaveState("idle"); setAutosaveRevision((revision) => revision + 1);
   }
 
   function editFinding(kind: FindingKind, id: string, value: string) {
+    if (orderLocked) return;
     workspaceEpoch.current++;
     setResult((current) => current ? { ...current, profile: { ...current.profile, findings: { ...current.profile.findings, [kind]: current.profile.findings[kind].map((finding) => finding.id === id ? { ...finding, value, confidence: Math.min(finding.confidence, 0.6) } : finding) } } } : current);
     setStatus("ready"); setSaveState("idle"); setAutosaveRevision((revision) => revision + 1);
   }
 
   function addFinding(kind: FindingKind) {
+    if (orderLocked) return;
     workspaceEpoch.current++;
     if (!result) return;
     const source = result.sources?.[0];
@@ -549,13 +634,29 @@ export default function Home() {
   }
 
   async function saveCampaign(nextStatus: "evidence_review" | "approved" | "campaign", autosave = false) {
-    workspaceEpoch.current++;
-    setError("");
-    if (!result?.projectId) {
-      setStatus(nextStatus === "evidence_review" ? "ready" : nextStatus);
-      setSaveState("saved");
+    if (orderLocked) return;
+    if (generationStatus !== "idle") {
+      if (!autosave) setError("Wait for the current campaign action to finish before saving evidence.");
       return;
     }
+    if (evidenceRequest.current?.session === editorSession.current) {
+      if (!autosave) setError("The previous evidence save is still finishing. Please try again when it completes.");
+      return;
+    }
+    const request = { projectId: result?.projectId, epoch: ++workspaceEpoch.current, session: editorSession.current };
+    setError("");
+    if (!result) return;
+    const submitted = editorSnapshot(result, claims);
+    if (!result?.projectId) {
+      setResult({ ...result, profile: { ...result.profile, claims } });
+      setSavedEditor((current) => current ? { ...current, evidence: submitted.evidence } : submitted);
+      setStatus(nextStatus === "evidence_review" ? "ready" : nextStatus);
+      setSaveState("saved");
+      setAutosaveRevision(0);
+      return;
+    }
+    evidenceRequest.current = request;
+    setEvidenceSaving(true);
     if (autosave || nextStatus === "evidence_review") setSaveState("saving");
     try {
       const response = await fetch(`/api/projects/${result.projectId}`, {
@@ -568,102 +669,187 @@ export default function Home() {
         window.location.assign("/login");
         return;
       }
+      if (response.status === 409) {
+        registerSaveConflict(result.projectId, payload.error ?? "The saved project changed before these edits could be saved.", request.session);
+        return;
+      }
+      if (editorSession.current !== request.session || currentProjectId.current !== request.projectId || observedOrderProject.current === request.projectId) return;
+      const isLatestResponse = canApplyEditorResponse(request, currentProjectId.current, workspaceEpoch.current);
+      if (!response.ok && !isLatestResponse) return;
       if (!response.ok) throw new Error(payload.error ?? "Unable to save the campaign.");
-      setStatus(nextStatus === "evidence_review" ? "ready" : nextStatus);
-      setResult((current) => current ? { ...current, profile: { ...current.profile, claims }, campaignStatus: nextStatus === "campaign" ? "draft_ready" : nextStatus } : current);
-      setProjects((current) => current.map((project) => project.id === result.projectId ? { ...project, name: result.profile.company, campaignStatus: nextStatus === "campaign" ? "draft_ready" : nextStatus, updatedAt: new Date().toISOString() } : project));
-      setSaveState("saved");
+      const saved = payload.saved as EvidenceSaveOutcome;
+      if (!saved?.profile || !saved.updatedAt || !Object.hasOwn(saved, "campaign")) throw new Error("The save response is incomplete. Reload saved content before approving the campaign.");
+      const latest = latestEditor.current;
+      const evidenceUnchanged = Boolean(latest.result && editorSnapshot(latest.result, latest.claims).evidence === submitted.evidence);
+      // A later edit can change the epoch while this serialized save commits.
+      // Acknowledge the exact server baseline, but never replace that edit or
+      // pretend an evidence-only request saved locally edited campaign assets.
+      setResult((current) => current && current.projectId === request.projectId ? mergeEvidenceSave(current, savedEditor, saved, evidenceUnchanged) : current);
+      setSavedEditor(evidenceSaveBaseline(request.projectId!, saved));
+      setProjects((current) => current.map((project) => project.id === request.projectId ? { ...project, name: saved.profile.company, campaignStatus: saved.campaignStatus, updatedAt: saved.updatedAt } : project));
+      if (evidenceUnchanged) {
+        setClaims(saved.profile.claims);
+        if (isLatestResponse) setStatus(nextStatus === "evidence_review" ? "ready" : nextStatus);
+        setSaveState("saved");
+        setAutosaveRevision(0);
+      } else {
+        setSaveState("idle");
+      }
     } catch (caught) {
+      if (!canApplyEditorResponse(request, currentProjectId.current, workspaceEpoch.current)) return;
       setError(caught instanceof Error ? caught.message : "Unable to save the campaign.");
       setSaveState("failed");
+      setAutosaveRevision(0);
+    } finally {
+      if (evidenceRequest.current?.epoch === request.epoch) evidenceRequest.current = null;
+      if (editorSession.current === request.session) setEvidenceSaving(false);
     }
   }
 
+  function registerSaveConflict(projectId: string, message: string, session: number) {
+    if (currentProjectId.current !== projectId || editorSession.current !== session) return;
+    workspaceEpoch.current++;
+    setSaveConflict({ projectId, message });
+    setSaveState("failed");
+    setGenerationStatus("idle");
+    setFulfillmentRefreshRevision((revision) => revision + 1);
+  }
+
   async function selectProject(projectId: string) {
-    if (!projectId) return;
+    if (!projectId || projectLoading) return;
+    if (hasLocalEdits && !window.confirm("Discard this tab's unsaved local edits and load saved content? Cancel to download a local draft first. This cannot be undone.")) return;
     const epoch = ++workspaceEpoch.current;
-    setError(""); setSaveState("idle");
+    editorSession.current++;
+    evidenceRequest.current = null; campaignAction.current = null; restoreRequest.current = null;
+    setEvidenceSaving(false); setGenerationStatus("idle"); setFulfillmentLoading(false);
+    setError(""); setProjectLoading(true);
     try {
       const response = await fetch(`/api/projects/${projectId}`, { cache: "no-store" });
       const payload = await response.json();
       if (response.status === 401) return void window.location.assign("/login");
       if (!response.ok) throw new Error(payload.error ?? "Unable to load the project.");
+      if (!payload.project) throw new Error("Saved content is unavailable. Your local draft has been kept.");
       if (workspaceEpoch.current === epoch) applyProject(payload.project);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to load the project.");
+      if (workspaceEpoch.current === epoch) setError(caught instanceof Error ? caught.message : "Unable to load the project.");
+    } finally {
+      setProjectLoading(false);
+      setFulfillmentRefreshRevision((revision) => revision + 1);
     }
   }
 
   function newProject() {
+    if (projectLoading) return;
+    if (hasLocalEdits && !window.confirm("Discard this tab's unsaved local edits and start a new project? Cancel to download a local draft first. This cannot be undone.")) return;
     workspaceEpoch.current++;
-    setResult(null); setClaims([]); setUrl(""); setStatus("idle"); setError(""); setSaveState("idle"); setActiveView("Command Center");
+    editorSession.current++;
+    currentProjectId.current = undefined;
+    observedOrderProject.current = undefined;
+    campaignAction.current = null; restoreRequest.current = null;
+    evidenceRequest.current = null; setEvidenceSaving(false);
+    setSavedEditor(null); setSaveConflict(null); setFulfillmentSnapshot(null); setFulfillmentLoading(false); setFulfillmentError(""); setGenerationStatus("idle");
+    setResult(null); setClaims([]); setUrl(""); setStatus("idle"); setError(""); setSaveState("idle"); setAutosaveRevision(0); setActiveView("Command Center");
   }
 
   async function generateCampaign() {
+    if (orderLocked) return;
     if (!result?.projectId) return setError("Save the project before generating a campaign.");
-    const submittedEpoch = workspaceEpoch.current;
+    if (evidenceSaving) return setError("Wait for the evidence save to finish before generating a campaign.");
+    if (hasLocalEdits) return setError("Save your local evidence and campaign edits before generating. You can download a local draft to keep a separate copy.");
+    const request = { projectId: result.projectId, epoch: ++workspaceEpoch.current, session: editorSession.current };
+    campaignAction.current = request.epoch;
     setError(""); setGenerationStatus("generating");
     try {
       const response = await fetch(`/api/projects/${result.projectId}/campaign/generate`, { method: "POST" });
       const payload = await response.json();
       if (response.status === 401) return void window.location.assign("/login");
+      if (response.status === 409) return registerSaveConflict(result.projectId, payload.error ?? "The saved project changed before generation.", request.session);
+      if (!canApplyEditorResponse(request, currentProjectId.current, workspaceEpoch.current)) return;
       if (!response.ok) throw new Error(payload.error ?? "Unable to generate the campaign.");
-      if (response.status === 202) return followBackgroundJob(payload.job, submittedEpoch);
+      if (response.status === 202) return followBackgroundJob(payload.job, request.epoch);
       setResult((current) => current ? { ...current, campaign: payload.campaign, campaignStatus: "draft_ready" } : current);
+      setSavedEditor((current) => current?.projectId === request.projectId ? { ...current, campaign: JSON.stringify(payload.campaign) } : current);
       setStatus("campaign");
     } catch (caught) {
+      if (!canApplyEditorResponse(request, currentProjectId.current, workspaceEpoch.current)) return;
       setError(caught instanceof Error ? caught.message : "Unable to generate the campaign.");
     } finally {
-      setGenerationStatus("idle");
+      if (campaignAction.current === request.epoch && editorSession.current === request.session) setGenerationStatus("idle");
     }
   }
 
   function editCampaignAsset(id: string, field: "title" | "content", value: string) {
+    if (orderLocked) return;
     workspaceEpoch.current++;
     setResult((current) => current?.campaign ? { ...current, campaign: { ...current.campaign, status: "draft", assets: current.campaign.assets.map((asset) => asset.id === id ? { ...asset, [field]: value, status: "draft" } : asset) } } : current);
   }
 
   async function saveCampaignAssets(nextStatus: "draft" | "approved") {
-    workspaceEpoch.current++;
+    if (orderLocked) return;
     if (!result?.projectId || !result.campaign) return;
+    if (evidenceSaving) return setError("Wait for the evidence save to finish before saving campaign assets.");
+    if (changes.evidence) return setError("Save your local evidence changes before saving or approving campaign assets.");
+    const request = { projectId: result.projectId, epoch: ++workspaceEpoch.current, session: editorSession.current };
+    campaignAction.current = request.epoch;
     setError(""); setGenerationStatus("saving");
     try {
       const response = await fetch(`/api/projects/${result.projectId}/campaign`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ assets: result.campaign.assets, status: nextStatus }) });
       const payload = await response.json();
       if (response.status === 401) return void window.location.assign("/login");
+      if (response.status === 409) return registerSaveConflict(result.projectId, payload.error ?? "The saved project changed before these assets could be saved.", request.session);
+      if (!canApplyEditorResponse(request, currentProjectId.current, workspaceEpoch.current)) return;
       if (!response.ok) throw new Error(payload.error ?? "Unable to save the campaign.");
-      setResult((current) => current ? { ...current, campaign: payload.campaign } : current);
+      setResult((current) => current ? { ...current, campaign: payload.campaign, campaignStatus: nextStatus === "approved" ? "campaign_approved" : "draft_ready" } : current);
+      setSavedEditor((current) => current?.projectId === request.projectId ? { ...current, campaign: JSON.stringify(payload.campaign) } : current);
       if (nextStatus === "approved") setProjects((current) => current.map((project) => project.id === result.projectId ? { ...project, campaignStatus: "campaign_approved" } : project));
     } catch (caught) {
+      if (!canApplyEditorResponse(request, currentProjectId.current, workspaceEpoch.current)) return;
       setError(caught instanceof Error ? caught.message : "Unable to save the campaign.");
     } finally {
-      setGenerationStatus("idle");
+      if (campaignAction.current === request.epoch && editorSession.current === request.session) setGenerationStatus("idle");
     }
+  }
+
+  function downloadMarkdown(markdown: string, filename: string) {
+    const href = URL.createObjectURL(new Blob([markdown], { type: "text/markdown" }));
+    const anchor = document.createElement("a");
+    anchor.href = href; anchor.download = filename; anchor.click();
+    URL.revokeObjectURL(href);
+  }
+
+  function exportLocalDraft() {
+    if (!result) return;
+    downloadMarkdown(localDraftMarkdown(result, claims), `${result.profile.company.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-LOCAL-DRAFT.md`);
   }
 
   function exportCampaignAssets() {
     if (!result?.campaign) return;
-    const markdown = result.campaign.assets.map((asset) => `# ${asset.title}\n\n${asset.content}\n\nEvidence: ${asset.claimIds.join(", ")}`).join("\n\n---\n\n");
-    const href = URL.createObjectURL(new Blob([markdown], { type: "text/markdown" }));
-    const anchor = document.createElement("a");
-    anchor.href = href; anchor.download = `${result.profile.company.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-campaign-v${result.campaign.version}.md`; anchor.click();
-    URL.revokeObjectURL(href);
+    if (draftExport) return exportLocalDraft();
+    const markdown = `# Saved campaign assets — version ${result.campaign.version}\n\nStatus when loaded: ${result.campaign.status}. This export is not an order receipt; use the saved report for fulfillment records.\n\n` + result.campaign.assets.map((asset) => `## ${asset.title}\n\n${asset.content}\n\nEvidence: ${asset.claimIds.join(", ")}`).join("\n\n---\n\n");
+    downloadMarkdown(markdown, `${result.profile.company.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-saved-campaign-v${result.campaign.version}.md`);
   }
 
   async function prepareFulfillmentState(details: DistributionDetails) {
-    if (!result?.projectId) return;
+    if (!result?.projectId || orderLocked) return;
+    if (evidenceSaving) return setError("Wait for the evidence save to finish before preparing fulfillment.");
+    if (hasLocalEdits) return setError("Save and approve your local changes before preparing fulfillment. An order uses saved content only.");
+    const request = { projectId: result.projectId, epoch: ++workspaceEpoch.current, session: editorSession.current };
     setError(""); setFulfillmentLoading(true);
     try {
       const response = await fetch(`/api/projects/${result.projectId}/fulfillment`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(details) });
       const payload = await response.json();
       if (response.status === 401) return void window.location.assign("/login");
+      if (response.status === 409) return registerSaveConflict(result.projectId, payload.error ?? "The saved project changed before fulfillment could be prepared.", request.session);
+      if (!canApplyEditorResponse(request, currentProjectId.current, workspaceEpoch.current)) return;
       if (!response.ok) throw new Error(payload.error ?? "Unable to prepare fulfillment.");
+      observedOrderProject.current = result.projectId;
       setFulfillmentSnapshot({ projectId: result.projectId, state: payload.fulfillment });
       setResult((current) => current ? { ...current, campaignStatus: "awaiting_payment" } : current);
     } catch (caught) {
+      if (!canApplyEditorResponse(request, currentProjectId.current, workspaceEpoch.current)) return;
       setError(caught instanceof Error ? caught.message : "Unable to prepare fulfillment.");
     } finally {
-      setFulfillmentLoading(false);
+      if (editorSession.current === request.session) setFulfillmentLoading(false);
     }
   }
 
@@ -682,18 +868,47 @@ export default function Home() {
     }
   }
 
+  function onRestoreBusy(busy: boolean) {
+    if (busy) {
+      restoreRequest.current = { projectId: result?.projectId, epoch: ++workspaceEpoch.current, session: editorSession.current };
+      setGenerationStatus("saving");
+    } else if (restoreRequest.current?.session === editorSession.current) {
+      setGenerationStatus("idle");
+    }
+  }
+
+  function onCampaignRestored(campaign: CampaignDraft) {
+    const request = restoreRequest.current;
+    if (orderLocked || !request || !canApplyEditorResponse(request, currentProjectId.current, workspaceEpoch.current)) return;
+    workspaceEpoch.current++;
+    setGenerationStatus("idle");
+    setResult((current) => current?.projectId === request.projectId && current ? { ...current, campaign, campaignStatus: "draft_ready" } : current);
+    setSavedEditor((current) => current?.projectId === request.projectId && current ? { ...current, campaign: JSON.stringify(campaign) } : current);
+    setProjects((current) => current.map((project) => project.id === request.projectId ? { ...project, campaignStatus: "draft_ready" } : project));
+    setStatus("campaign");
+  }
+
   return (
     <AppShell activeView={activeView} setActiveView={setActiveView} hasIntelligence={Boolean(result)}>
-      <TopBar activeView={activeView} hasIntelligence={Boolean(result)} persistence={result?.persistence} canSignOut={persistenceEnabled} projects={projects} projectId={result?.projectId} selectProject={(id) => void selectProject(id)} newProject={newProject} />
+      <TopBar activeView={activeView} hasIntelligence={Boolean(result)} persistence={result?.persistence} localDraft={hasLocalEdits || Boolean(conflictMessage)} canSignOut={persistenceEnabled} projects={projects} projectId={result?.projectId} selectProject={(id) => void selectProject(id)} newProject={newProject} />
       {jobError ? <p className="workspace-error" role="alert">{jobError}</p> : null}
       {result?.projectId && fulfillmentError ? <p className="workspace-error" role="status">Fulfillment refresh unavailable: {fulfillmentError} {fulfillment ? "Showing the last loaded records." : "Unloaded metrics are shown as dashes, not zero results."}</p> : null}
+      {orderLocked ? <p className="workspace-error" role="status">{orderLockMessage}</p> : null}
+      {result && (hasLocalEdits || conflictMessage) ? <section className="surface campaign-history" aria-label="Local draft notice" role={requiresSavedReload ? "alert" : "status"}>
+        <div className="surface-heading"><div><span>{requiresSavedReload ? "Local draft conflict — reload saved content" : "Unsaved local changes"}</span><small>{requiresSavedReload ? "This tab's content is not the saved or ordered campaign. Saving is paused; your local edits are still here." : "Changes shown in this tab may differ from saved records. Evidence edits autosave; campaign asset edits need Save new version."}</small></div><EvidenceBadge state="LOCAL DRAFT" tone="warning" /></div>
+        <div className="campaign-history-body">
+        {conflictMessage ? <p className="workspace-error">{conflictMessage}</p> : null}
+        <p>Download a clearly labeled local draft to keep your work before reloading. Saved history, source links, and the server-generated report remain available; the report does not include unsaved local edits.</p>
+        <div className="campaign-editor-actions"><button className="secondary-button" onClick={exportLocalDraft}>Download local draft</button>{result.projectId ? <button className="secondary-button" disabled={projectLoading} onClick={() => void selectProject(result.projectId!)}>{projectLoading ? "Loading saved content…" : hasLocalEdits ? "Discard local edits & reload saved" : "Reload saved content"}</button> : null}</div>
+        </div>
+      </section> : null}
       {intelligenceJobs.length ? <section className="surface background-work" aria-label="Background work"><div className="surface-heading"><div><span>Background work</span><small>You can leave this page. Queued work and results are saved to your workspace.</small></div></div>{intelligenceJobs.filter((job, index) => pendingJob(job) || index < 3).slice(0, 8).map((job) => <div className="timeline-row" key={job.id}><div><strong>{job.type === "analysis" ? "Company intelligence" : "Campaign generation"}</strong><p>{intelligenceJobHost(job.url)} · {job.message ?? (job.status === "running" ? "Working on your saved request…" : "Waiting for the background worker…")}</p></div><EvidenceBadge state={job.status.toUpperCase()} tone={job.status === "completed" ? "positive" : job.status === "failed" ? "warning" : "neutral"} />{job.status === "completed" ? <button className="mode-button" onClick={() => void selectProject(job.projectId)}>Open results</button> : null}</div>)}</section> : null}
       {error && activeView !== "Command Center" ? <p className="workspace-error" role="alert">{error}</p> : null}
-      {activeView === "Command Center" ? <IntelligenceInput url={url} setUrl={setUrl} submit={submit} status={intelligenceJobs.some((job) => job.type === "analysis" && pendingJob(job)) ? "loading" : status} error={error} /> : null}
+      {activeView === "Command Center" ? <IntelligenceInput url={url} setUrl={setUrl} submit={submit} status={intelligenceJobs.some((job) => job.type === "analysis" && pendingJob(job)) ? "loading" : status} error={error} orderLocked={orderLocked} /> : null}
       {activeView === "Command Center" ? <CommandCenter result={result} status={status} fulfillment={fulfillment} openCampaign={() => setActiveView("Campaign Studio")} /> : null}
-      {activeView === "Brand Intelligence" ? <BrandIntelligence result={result} claims={claims} editClaim={editClaim} editProfile={editProfile} editFinding={editFinding} addFinding={addFinding} saveEvidence={() => void saveCampaign("evidence_review")} saveState={saveState} /> : null}
-      {activeView === "Campaign Studio" ? <CampaignStudio result={result} claims={claims} toggleClaim={toggleClaim} approvable={approvable} status={status} approve={() => void saveCampaign("approved")} generate={() => void generateCampaign()} editAsset={editCampaignAsset} saveAssets={(nextStatus) => void saveCampaignAssets(nextStatus)} exportAssets={exportCampaignAssets} generationStatus={intelligenceJobs.some((job) => job.projectId === result?.projectId && pendingJob(job)) ? "generating" : generationStatus} fulfillmentStarted={Boolean(fulfillment?.order) || ["awaiting_payment", "fulfillment"].includes(result?.campaignStatus ?? "")} onRestoreBusy={(busy) => setGenerationStatus(busy ? "saving" : "idle")} onRestored={(campaign) => { const projectId = result?.projectId; workspaceEpoch.current++; setGenerationStatus("idle"); setResult((current) => current && current.projectId === projectId ? { ...current, campaign, campaignStatus: "draft_ready" } : current); setProjects((current) => current.map((project) => project.id === projectId ? { ...project, campaignStatus: "draft_ready" } : project)); setStatus("campaign"); }} /> : null}
-      {activeView === "Distribution Center" ? <DistributionCenter result={result} fulfillment={fulfillment} prepare={(details) => void prepareFulfillmentState(details)} loading={fulfillmentLoading} /> : null}
+      {activeView === "Brand Intelligence" ? <BrandIntelligence result={result} claims={claims} editClaim={editClaim} editProfile={editProfile} editFinding={editFinding} addFinding={addFinding} saveEvidence={() => void saveCampaign("evidence_review")} saveState={saveState} orderLocked={orderLocked} /> : null}
+      {activeView === "Campaign Studio" ? <CampaignStudio result={result} claims={claims} toggleClaim={toggleClaim} approvable={approvable} status={status} approve={() => void saveCampaign("approved")} generate={() => void generateCampaign()} editAsset={editCampaignAsset} saveAssets={(nextStatus) => void saveCampaignAssets(nextStatus)} exportAssets={exportCampaignAssets} draftExport={draftExport} generationStatus={intelligenceJobs.some((job) => job.projectId === result?.projectId && pendingJob(job)) ? "generating" : generationStatus} evidenceSaving={evidenceSaving} orderLocked={orderLocked} onRestoreBusy={onRestoreBusy} onRestored={onCampaignRestored} /> : null}
+      {activeView === "Distribution Center" ? <DistributionCenter result={result} fulfillment={fulfillment} prepare={(details) => void prepareFulfillmentState(details)} loading={fulfillmentLoading} orderLocked={orderLocked} /> : null}
       {activeView === "Authority Graph" ? <AuthorityGraphScreen result={result} fulfillment={fulfillment} /> : null}
       {activeView === "Reports" ? <ReportsScreen result={result} fulfillment={fulfillment} /> : null}
       {activeView === "Packages" ? <PackagesScreen offers={billingOffers} eligible={result?.campaign?.status === "approved" && fulfillment?.order?.status === "awaiting_payment"} selectedPackageId={fulfillment?.order?.selectedPackageId} checkoutLoading={checkoutLoading} checkout={(packageId) => void startCheckout(packageId)} /> : null}

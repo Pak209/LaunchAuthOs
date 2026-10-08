@@ -20,6 +20,15 @@
       ]
     },
     {
+      "collectionGroup": "siteDiagnosticJobs",
+      "fieldPath": "status",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
+    {
       "collectionGroup": "orders",
       "fieldPath": "stripePaymentIntentId",
       "indexes": [

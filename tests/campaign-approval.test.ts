@@ -80,4 +80,26 @@ describe("server-owned campaign approval", () => {
     await expect(attestCampaignApproval(db.asFirestore(), "user-1", "a".repeat(24), campaign)).rejects.toThrow("not found");
     expect(db.rows.has(`${projectPath}/campaignApprovals/current`)).toBe(false);
   });
+
+  it.each(["awaiting_payment", "paid", "submitted", "published", "canceled", "refunded"])("does not replace approval or audit after an order exists: %s", async (status) => {
+    const db = new MemoryFirestore();
+    const projectPath = `workspaces/personal_user-1/projects/${"a".repeat(24)}`;
+    const approval = { campaignVersion: 4, campaignDigest: campaignDigest(campaign), approvedBy: "user-1", approvedAt: "original" };
+    db.seed(projectPath, { createdBy: "user-1" });
+    db.seed(`${projectPath}/campaigns/current`, campaign);
+    db.seed(`${projectPath}/orders/current`, { status });
+    db.seed(`${projectPath}/campaignApprovals/current`, approval);
+    await expect(attestCampaignApproval(db.asFirestore(), "user-1", "a".repeat(24), campaign)).rejects.toThrow("fulfillment order");
+    expect(db.read(`${projectPath}/campaignApprovals/current`)).toEqual(approval);
+    expect([...db.rows.keys()].filter((path) => path.includes("/auditLogs/"))).toHaveLength(0);
+  });
+
+  it.each(["campaignStatus", "lifecycleStatus"])("respects a legacy %s fulfillment lock even without an order", async (field) => {
+    const db = new MemoryFirestore();
+    const projectPath = `workspaces/personal_user-1/projects/${"a".repeat(24)}`;
+    db.seed(projectPath, { createdBy: "user-1", [field]: "fulfillment" });
+    db.seed(`${projectPath}/campaigns/current`, campaign);
+    await expect(attestCampaignApproval(db.asFirestore(), "user-1", "a".repeat(24), campaign)).rejects.toThrow("fulfillment order");
+    expect(db.rows.has(`${projectPath}/campaignApprovals/current`)).toBe(false);
+  });
 });

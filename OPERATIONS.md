@@ -17,11 +17,19 @@ Reconciliation receipts and audit records retain the operator, supplier evidence
 
 Authenticated analysis and generation enqueue durable workspace jobs and return immediately. Customers can leave the page and resume from **Background work → Open results**. Local unconfigured analysis remains synchronous.
 
-Run `POST /api/internal/jobs/run` on a production schedule with its bearer secret. Fulfillment and intelligence run independently; the response waits for both and reports partial failures. Provide a runtime capable of the 300-second worker request allowance. Test the actual host timeout, rather than assuming the Next.js route setting changes the host plan.
+Run `POST /api/internal/jobs/run` on a production schedule with its bearer secret. Fulfillment, intelligence, and site diagnostics run independently; the response waits for all three and reports partial failures. Provide a runtime capable of the 300-second worker request allowance. Test the actual host timeout, rather than assuming the Next.js route setting changes the host plan.
 
 Intelligence jobs use five-minute leases and at most three attempts. A changed project/campaign/order supersedes the result; a customer must review current work and start a new job. Failed jobs preserve existing content. Do not retry by copying job documents: use the normal analysis/generation action. These retries may incur model usage, so configure budgets and operational alerts before beta.
 
-Deploy `firestore.indexes.json` before scheduling workers. Verify group queries for `jobs.status`, `intelligenceJobs.status`, and `orders.stripePaymentIntentId`, then set `FIRESTORE_INDEXES_VERIFIED=true`. Set `JOB_SCHEDULER_VERIFIED=true` only after observing scheduled processing and an interrupted-worker recovery in the deployment environment.
+Deploy `firestore.indexes.json` before scheduling workers. Verify group queries for `jobs.status`, `intelligenceJobs.status`, `siteDiagnosticJobs.status`, and `orders.stripePaymentIntentId`, then set `FIRESTORE_INDEXES_VERIFIED=true`. Set `JOB_SCHEDULER_VERIFIED=true` only after observing scheduled processing and an interrupted-worker recovery in the deployment environment.
+
+## Customer-site diagnostics
+
+On a saved project, open **Brand Intelligence → Customer-site diagnostics**, confirm authority to inspect the public company site, then run the diagnostic. The server takes the URL from the saved project, not from the request body. No customer-site content is changed. Existing fulfillment orders do not prevent these observational reports and are never rewritten by this workflow.
+
+The worker inspects at most four same-origin page candidates, a robots policy and two bounded sitemaps, with per-hop public DNS validation and connection pinning. It does not run JavaScript, follow cross-origin redirects, bypass access controls, or impersonate search engines. Unavailable robots policies stop page crawling conservatively. Reports distinguish recorded directives and apparent indexability from actual engine index inclusion, which remains **not checked**. Review limitations, errors and supporting snapshots before using a finding.
+
+Jobs have five-minute leases and at most three attempts. A saved URL or request change supersedes stale results. The latest completed report remains available during new runs or failures; completion, report creation and the latest pointer are committed together. Report downloads contain bounded raw response excerpts, relevant headers/tags, timestamps, scope and hashes. They are customer-private evidence, not material to publish automatically. Configure retention/deletion and conduct an owner-authorized acceptance run before production availability.
 
 ## Pilot acceptance record
 
@@ -40,6 +48,14 @@ If another operator updated the task, refresh before deciding. Retry an unchange
 ## Campaign history
 
 Customers open **Version history** below the campaign editor, preview an earlier snapshot, and explicitly confirm restoration. Restoration creates a new draft and preserves previous versions. All assets need fresh review and approval. An existing fulfillment order, an active analysis/generation job, unavailable evidence, or a changed project invalidates restoration. Reload the project/history before retrying a conflict; never copy an old approval attestation onto restored content.
+
+## Ordered-project editing boundary
+
+Preparing fulfillment locks the project's evidence, company profile, claims, campaign assets, and approval. Cancellation, failed fulfillment, and refunds do not reopen editing: the order retains its frozen campaign and audit history. Read-only history, previews, source links and downloads remain available. Never delete an order or change project lifecycle fields to unlock it.
+
+Confirmed order conflicts return HTTP 409, including when an authenticated recheck finds that an order won a concurrent edit. Failed rechecks preserve the original error and never retry the write. If order status cannot be verified, the UI temporarily pauses editing; restore connectivity and reload the project before retrying. The backend remains authoritative even if another tab shows older controls. Deploy the current `firestore.rules` and repeat target-environment integration checks before marking rules verified; a previous successful deployment or local test is not proof that the current rules are deployed.
+
+If another session prepares an order while this tab has unsaved changes, the editor shows a conflict notice. Download the explicitly labeled **local draft** before choosing to discard local edits and reload saved content. A local draft is not proof of order content or approval. Reload requires confirmation; stale responses from earlier editor/project sessions cannot replace the current view.
 
 ## Reading dashboard outcomes
 

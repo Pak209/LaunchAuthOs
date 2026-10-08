@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getAuthenticatedFirebaseContext } from "@/lib/firebase/server";
 import { getFirebaseAdminDb, isFirebaseAdminExplicitlyConfigured } from "@/lib/firebase/admin";
 import { attestCampaignApproval } from "@/lib/campaign-approval";
-import { saveCampaignRevision } from "@/lib/persistence";
+import { ProjectMutationConflictError, saveCampaignRevision } from "@/lib/persistence";
 import { assertSameOrigin } from "@/lib/request-security";
 
 const assetSchema = z.object({
@@ -33,7 +33,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
     return NextResponse.json({ campaign });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to save the campaign.";
-    const status = error instanceof z.ZodError ? 400 : message.includes("Authentication") ? 401 : message.includes("not configured") ? 503 : message.includes("approved") ? 409 : 500;
+    const status = error instanceof z.ZodError ? 400 : error instanceof ProjectMutationConflictError ? 409 : message.includes("Authentication") ? 401 : message.includes("not configured") ? 503 : message.includes("approved") || message.includes("fulfillment order") ? 409 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

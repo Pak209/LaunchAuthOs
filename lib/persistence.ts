@@ -12,9 +12,12 @@ import {
   serverTimestamp,
   setDoc,
   writeBatch,
+  type DocumentReference,
   type Firestore,
+  type Transaction,
 } from "firebase/firestore";
 import type { BrandProfile, CampaignDraft, Claim, EvidenceSnapshot, FindingKind, GeneratedCampaignAsset, PersistedAnalysisResult, ProjectStatus, ProjectSummary } from "./types";
+import { invalidateCampaignApproval, type EvidenceSaveOutcome } from "./evidence-save-state";
 
 type StoredProject = {
   workspaceId: string;
@@ -30,6 +33,46 @@ type StoredProject = {
   fetchedAt: string;
   updatedAtIso?: string;
 };
+
+export class ProjectMutationConflictError extends Error {
+  readonly status = 409;
+}
+
+function assertProjectEditable(stored: Partial<StoredProject> | undefined, orderExists: boolean) {
+  if (orderExists || [stored?.campaignStatus, stored?.lifecycleStatus].some((status) => status === "awaiting_payment" || status === "fulfillment")) {
+    throw new ProjectMutationConflictError("This project has a fulfillment order. Its evidence and campaign are locked, including after cancellation or refund.");
+  }
+}
+
+function nextCampaignVersion(version: number | undefined) {
+  const current = version === undefined ? 0 : version;
+  if (!Number.isSafeInteger(current) || current < 0 || current >= 999_999) {
+    throw new ProjectMutationConflictError("This campaign has reached its version limit or has invalid history. Contact support.");
+  }
+  return current + 1;
+}
+
+async function runEditableProjectTransaction<T>(db: Firestore, projectRef: DocumentReference, action: (transaction: Transaction) => Promise<T>): Promise<T> {
+  try {
+    return await runTransaction(db, action);
+  } catch (error) {
+    // If an order appears after the optimistic reads, rules may reject the
+    // commit before the SDK retries. Resolve that conflict using the same
+    // authenticated reader; never retry writes or bypass rules with Admin.
+    if (error instanceof Error && "code" in error && error.code === "permission-denied") {
+      try {
+        const [project, order] = await Promise.all([
+          getDoc(projectRef), getDoc(doc(projectRef, "orders", "current")),
+        ]);
+        assertProjectEditable(project.data() as StoredProject | undefined, order.exists());
+      } catch (checkError) {
+        if (checkError instanceof ProjectMutationConflictError) throw checkError;
+        // A revoked membership or unavailable read is not evidence of an order.
+      }
+    }
+    throw error;
+  }
+}
 
 function personalWorkspaceId(uid: string): string {
   return `personal_${uid}`;
@@ -119,30 +162,34 @@ export async function persistAnalysis(
     fetchedAt: result.fetchedAt,
     updatedAtIso: now,
   };
-  const batch = writeBatch(db);
-  batch.set(projectRef, {
-    ...stored,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
-  batch.set(doc(projectRef, "profiles", "current"), {
-    ...result.profile,
-    version: 1,
-    updatedAt: serverTimestamp(),
+  await runEditableProjectTransaction(db, projectRef, async (transaction) => {
+    const [project, order] = await Promise.all([
+      transaction.get(projectRef), transaction.get(doc(projectRef, "orders", "current")),
+    ]);
+    assertProjectEditable(project.data() as StoredProject | undefined, order.exists());
+    transaction.set(projectRef, {
+      ...stored,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    transaction.set(doc(projectRef, "profiles", "current"), {
+      ...result.profile,
+      version: 1,
+      updatedAt: serverTimestamp(),
+    });
+    for (const evidence of result.sources ?? []) {
+      transaction.set(doc(projectRef, "evidence", evidence.id), evidence, { merge: false });
+    }
+    for (const claim of result.profile.claims) {
+      transaction.set(doc(projectRef, "claims", claim.id), claim, { merge: true });
+    }
+    transaction.set(doc(projectRef, "campaigns", "current"), {
+      status: "evidence_review",
+      approvedClaimIds: [],
+      assetVersion: 0,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
   });
-  for (const evidence of result.sources ?? []) {
-    batch.set(doc(projectRef, "evidence", evidence.id), evidence, { merge: false });
-  }
-  for (const claim of result.profile.claims) {
-    batch.set(doc(projectRef, "claims", claim.id), claim, { merge: true });
-  }
-  batch.set(doc(projectRef, "campaigns", "current"), {
-    status: "evidence_review",
-    approvedClaimIds: [],
-    assetVersion: 0,
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
-  await batch.commit();
   return { ...result, projectId, persistence: "saved", campaignStatus: "evidence_review" };
 }
 
@@ -191,11 +238,16 @@ export async function updateProjectCampaign(
   profile: BrandProfile,
   claims: Claim[],
   status: ProjectStatus,
-): Promise<void> {
+): Promise<EvidenceSaveOutcome> {
   const workspaceId = await ensureWorkspace(db, user);
   const projectRef = doc(db, "workspaces", workspaceId, "projects", projectId);
-  await runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(projectRef);
+  return runEditableProjectTransaction(db, projectRef, async (transaction) => {
+    const campaignRef = doc(projectRef, "campaigns", "current");
+    const [snapshot, order, campaignSnapshot] = await Promise.all([
+      transaction.get(projectRef), transaction.get(doc(projectRef, "orders", "current")),
+      transaction.get(campaignRef),
+    ]);
+    assertProjectEditable(snapshot.data() as StoredProject | undefined, order.exists());
     if (!snapshot.exists()) throw new Error("The project was not found.");
     const stored = snapshot.data() as StoredProject;
     const storedByKey = new Map(stored.claims.map((claim) => [claim.id, claim]));
@@ -218,6 +270,8 @@ export async function updateProjectCampaign(
     const campaignStatus = status === "campaign" ? "draft_ready" : status;
     const normalizedProfile = { ...profile, sourceUrl: stored.url, claims: normalizedClaims };
     const updatedAtIso = new Date().toISOString();
+    const previousCampaign = campaignSnapshot.data() as CampaignDraft | undefined;
+    const campaign = previousCampaign?.assets?.length ? invalidateCampaignApproval(previousCampaign, updatedAtIso) : null;
     transaction.update(projectRef, {
       name: normalizedProfile.company,
       profile: normalizedProfile,
@@ -236,11 +290,14 @@ export async function updateProjectCampaign(
     for (const claim of normalizedClaims) {
       transaction.set(doc(projectRef, "claims", claim.id), claim, { merge: true });
     }
-    transaction.set(doc(projectRef, "campaigns", "current"), {
-      status: campaignStatus,
+    transaction.set(campaignRef, {
+      ...(campaign ?? {}),
+      status: "draft",
       approvedClaimIds: normalizedClaims.filter((claim) => claim.approved).map((claim) => claim.id),
-      updatedAt: serverTimestamp(),
+      updatedAt: updatedAtIso,
+      updatedAtServer: serverTimestamp(),
     }, { merge: true });
+    return { profile: normalizedProfile, campaign, campaignStatus, updatedAt: updatedAtIso };
   });
 }
 
@@ -264,23 +321,28 @@ export async function saveGeneratedCampaign(
   const workspaceId = await ensureWorkspace(db, user);
   const projectRef = doc(db, "workspaces", workspaceId, "projects", projectId);
   const campaignRef = doc(projectRef, "campaigns", "current");
-  return runTransaction(db, async (transaction) => {
-    const [projectSnapshot, campaignSnapshot] = await Promise.all([transaction.get(projectRef), transaction.get(campaignRef)]);
+  return runEditableProjectTransaction(db, projectRef, async (transaction) => {
+    const [projectSnapshot, campaignSnapshot, order] = await Promise.all([
+      transaction.get(projectRef), transaction.get(campaignRef), transaction.get(doc(projectRef, "orders", "current")),
+    ]);
+    assertProjectEditable(projectSnapshot.data() as StoredProject | undefined, order.exists());
     if (!projectSnapshot.exists()) throw new Error("The project was not found.");
     const stored = projectSnapshot.data() as StoredProject;
     assertCampaignAssets(assets, stored);
     const current = campaignSnapshot.data() as Partial<CampaignDraft> | undefined;
     const now = new Date().toISOString();
     const draft: CampaignDraft = {
-      version: (current?.version ?? 0) + 1,
+      version: nextCampaignVersion(current?.version),
       status: "draft",
       model,
       assets,
       generatedAt: now,
       updatedAt: now,
     };
+    const versionRef = doc(campaignRef, "versions", String(draft.version).padStart(6, "0"));
+    if ((await transaction.get(versionRef)).exists()) throw new ProjectMutationConflictError("A newer saved version already exists. Reload the project before editing.");
     transaction.set(campaignRef, { ...draft, updatedAtServer: serverTimestamp() });
-    transaction.set(doc(campaignRef, "versions", String(draft.version).padStart(6, "0")), { ...draft, createdAt: serverTimestamp() });
+    transaction.set(versionRef, { ...draft, createdAt: serverTimestamp() });
     transaction.update(projectRef, { campaignStatus: "draft_ready", lifecycleStatus: "draft_ready", generatedAt: now, updatedAtIso: now, updatedAt: serverTimestamp() });
     return draft;
   });
@@ -296,23 +358,28 @@ export async function saveCampaignRevision(
   const workspaceId = await ensureWorkspace(db, user);
   const projectRef = doc(db, "workspaces", workspaceId, "projects", projectId);
   const campaignRef = doc(projectRef, "campaigns", "current");
-  return runTransaction(db, async (transaction) => {
-    const [projectSnapshot, campaignSnapshot] = await Promise.all([transaction.get(projectRef), transaction.get(campaignRef)]);
+  return runEditableProjectTransaction(db, projectRef, async (transaction) => {
+    const [projectSnapshot, campaignSnapshot, order] = await Promise.all([
+      transaction.get(projectRef), transaction.get(campaignRef), transaction.get(doc(projectRef, "orders", "current")),
+    ]);
+    assertProjectEditable(projectSnapshot.data() as StoredProject | undefined, order.exists());
     if (!projectSnapshot.exists() || !campaignSnapshot.exists()) throw new Error("Generate the campaign before editing it.");
     const stored = projectSnapshot.data() as StoredProject;
     assertCampaignAssets(assets, stored);
     const current = campaignSnapshot.data() as CampaignDraft;
     const now = new Date().toISOString();
     const draft: CampaignDraft = {
-      version: (current.version ?? 0) + 1,
+      version: nextCampaignVersion(current.version),
       status,
       model: current.model,
       assets: assets.map((asset) => ({ ...asset, status })),
       generatedAt: current.generatedAt,
       updatedAt: now,
     };
+    const versionRef = doc(campaignRef, "versions", String(draft.version).padStart(6, "0"));
+    if ((await transaction.get(versionRef)).exists()) throw new ProjectMutationConflictError("A newer saved version already exists. Reload the project before editing.");
     transaction.set(campaignRef, { ...draft, updatedAtServer: serverTimestamp() });
-    transaction.set(doc(campaignRef, "versions", String(draft.version).padStart(6, "0")), { ...draft, createdAt: serverTimestamp() });
+    transaction.set(versionRef, { ...draft, createdAt: serverTimestamp() });
     transaction.update(projectRef, { campaignStatus: status === "approved" ? "campaign_approved" : "draft_ready", lifecycleStatus: status === "approved" ? "campaign_approved" : "draft_ready", updatedAtIso: now, updatedAt: serverTimestamp() });
     return draft;
   });
