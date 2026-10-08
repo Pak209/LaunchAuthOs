@@ -33,6 +33,8 @@ The public `/api/health` endpoint is liveness-only. The secret-protected `/api/i
 
 ## Verification
 
+Install dependencies with `npm ci` to use the reviewed lockfile, and run `npm audit` when updating dependencies. The scoped `@firebase/firestore` override keeps `@grpc/grpc-js` on patched version 1.14.5 because Firestore 4.17.1 still requests the vulnerable 1.9.x line. Remove the override only after the upstream dependency resolves to a patched version, and rerun the isolated Firestore suites after changing it.
+
 Run `npm run lint`, `npm test`, and `npm run build` before release. After changing Firestore rules, deploy them and run `npm run test:integration:firebase`; the live test creates two temporary accounts, proves cross-tenant access is denied and evidence is immutable, then deletes its test records and accounts.
 
 Use the [isolated Firestore order-lock suite](scripts/FIRESTORE_ORDER_LOCK_TESTS.md) to test direct client writes and edit/order races locally without credentials or live data. Its passing result does not verify deployment; keep `FIRESTORE_RULES_VERIFIED=false` until the current rules pass target-environment acceptance.
