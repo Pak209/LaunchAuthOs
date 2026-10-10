@@ -80,6 +80,7 @@ export async function enqueueIntelligenceJob(db: Firestore, userId: string, inpu
   return db.runTransaction(async (transaction) => {
     const [member, projectSnapshot, campaignSnapshot, order, lockSnapshot] = await Promise.all([transaction.get(target.member), transaction.get(target.project), transaction.get(target.campaign), transaction.get(target.order), transaction.get(lock)]);
     assertMember(member.data(), userId);
+    if ((await transaction.get(target.workspace.collection("companionDeletions").doc(projectId))).exists) throw new Error("This project was deleted.");
     const project = projectSnapshot.data() as ProjectData | undefined;
     assertProjectOwner(project, userId, target.workspaceId);
     if (input.type === "analysis" && project?.brief) throw new Error("This guided brief must be edited in the companion; reanalysis is not approved.");

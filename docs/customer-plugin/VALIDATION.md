@@ -144,3 +144,28 @@ workflow, provider hosting configuration or publishing trigger was found.
 Main remained aba42c28fd221b98da8f0f211f4aa0640a84403e and review branch did not
 previously exist remotely. These are observed repository surfaces, not an audit
 of every external provider account. Original checkout next-env.d.ts is untouched.
+
+## Confirmed draft-project deletion completion
+
+Added bounded atomic project deletion with exact confirmation, derived-content
+acknowledgement, owner and revision checks, retry/recreation marker, HTTP 410
+recovery, and explicit account-deletion HTTP 409. No real customer data was
+removed. Protected/linked/legacy/unknown/oversized records block the operation.
+
+Final validation: 519 unit tests / 33 files; 74 emulator tests / 3 files,
+including 35 companion tests; typecheck, production build and diff checks PASS.
+Deletion emulator cases include interrupted transaction/no partial writes,
+repeated/lost-response retries, concurrent deletes, edit and final-approval races,
+ownership isolation, protected records, missing-parent descendants, size guard
+and direct-client recreation denial. Independent review identified and verified
+fixes for orphan descendant inventory and stale concurrent-retry inventory;
+reviewer reported no remaining must-fix and independently passed 34 focused tests.
+
+Local production-build browser test with synthetic intercepted API responses
+passed at 390x844: confirmation requires exact project ID plus derived-content
+checkbox, payload binds displayed revision, successful deletion clears cached
+content, reopened deleted URL recovers from 410, and account limitation is visible.
+No runtime errors or horizontal overflow. This is not live login acceptance.
+
+No merge, deployment, live purge, credential or hosting changes. Full account
+removal needs the exact policy/identity/backups decisions listed in RETENTION.md.

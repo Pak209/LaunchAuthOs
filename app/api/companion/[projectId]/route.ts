@@ -2,6 +2,7 @@ import { getAuthenticatedFirebaseContext } from "@/lib/firebase/server";
 import { getFirebaseAdminDb, isFirebaseAdminExplicitlyConfigured } from "@/lib/firebase/admin";
 import { CompanionService } from "@/lib/companion/service";
 import { AccessError } from "@/lib/customer-mcp/auth";
+import { deleteCompanionProject } from "@/lib/companion/deletion";
 import { z } from "zod";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,8 +31,9 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     const origin = request.headers.get("origin"), expected = process.env.NEXT_PUBLIC_APP_URL ? new URL(process.env.NEXT_PUBLIC_APP_URL).origin : new URL(request.url).origin;
     if (origin !== expected || !request.headers.get("content-type")?.startsWith("application/json")) throw new AccessError(403, "Invalid request origin or content type.");
     const { uid, store } = await service(), id = (await context.params).projectId;
-    const { action, payload } = z.object({ action: z.enum(["create", "brief", "facts", "draft", "approve", "archive"]), payload: z.unknown() }).strict().parse(await boundedBody(request));
-    const result = action === "archive" ? await store.archive(uid, id, payload) : action === "create" || action === "brief" ? await store.saveBrief(uid, id, payload, action === "create") : action === "facts" ? await store.approveFacts(uid, id, payload) : action === "draft" ? await store.saveDraft(uid, id, payload) : await store.approveCampaign(uid, id, payload);
+    const { action, payload } = z.object({ action: z.enum(["create", "brief", "facts", "draft", "approve", "archive", "delete", "delete_account"]), payload: z.unknown() }).strict().parse(await boundedBody(request));
+    if (action === "delete_account") throw new AccessError(409, "Account deletion is unavailable until paid-order, approval/report retention and identity/provider handling are decided. No account deletion was queued or performed; project deletion does not erase account or backup data.");
+    const result = action === "delete" ? await deleteCompanionProject(getFirebaseAdminDb(), uid, id, payload) : action === "archive" ? await store.archive(uid, id, payload) : action === "create" || action === "brief" ? await store.saveBrief(uid, id, payload, action === "create") : action === "facts" ? await store.approveFacts(uid, id, payload) : action === "draft" ? await store.saveDraft(uid, id, payload) : await store.approveCampaign(uid, id, payload);
     return Response.json(result, { headers });
   } catch (e) { return failure(e); }
 }

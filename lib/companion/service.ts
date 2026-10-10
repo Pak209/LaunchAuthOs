@@ -23,6 +23,7 @@ export class CompanionService {
   async read(uid: string, id: string) {
     const r = refs(this.db, uid, id);
     const [p, m, c, o] = await Promise.all([r.project.get(), r.member.get(), r.campaign.get(), r.order.get()]);
+    if (!p.exists && m.data()?.userId === uid && (await r.workspace.collection("companionDeletions").doc(id).get()).exists) throw new AccessError(410, "This project was deleted from active app storage. Account and backup data were not erased.");
     check(p.data(), m.data(), uid, false, o.exists);
     const data = p.data()!;
     const brief: Brief = data.brief ? briefSchema.parse(data.brief) : { ...emptyBrief, company: data.name ?? "", product: data.profile?.product ?? "", audience: data.profile?.audience ?? "", angle: data.profile?.positioning ?? "", facts: (data.claims ?? []).slice(0, 40).map((f: Claim) => ({ id: f.id, text: f.text, kind: f.state === "ASSUMED" || f.state === "UNKNOWN" ? "assumption" as const : "fact" as const, reference: f.sourceUrl ?? "", approved: f.approved })) };
@@ -50,7 +51,8 @@ export class CompanionService {
   async saveBrief(uid: string, id: string, input: unknown, create = false) {
     const payload = saveBriefSchema.parse(input), r = refs(this.db, uid, id);
     return this.db.runTransaction(async tx => {
-      const [p, m, w, c, o] = await Promise.all([tx.get(r.project), tx.get(r.member), tx.get(r.workspace), tx.get(r.campaign), tx.get(r.order)]);
+      const [p, m, w, c, o, deleted] = await Promise.all([tx.get(r.project), tx.get(r.member), tx.get(r.workspace), tx.get(r.campaign), tx.get(r.order), tx.get(r.workspace.collection("companionDeletions").doc(id))]);
+      if (deleted.exists) throw new AccessError(409, "This project was deleted. Create a new project ID.");
       const data = p.data();
       if (!p.exists && create) {
         if (payload.expectedRevision !== 0 || o.exists) throw new AccessError(409, "Project already exists or is frozen.");

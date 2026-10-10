@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { initializeApp, deleteApp, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { CompanionService } from "../lib/companion/service";
@@ -19,7 +19,7 @@ beforeEach(async () => {
   uid = `companion_${randomUUID().replaceAll("-", "")}`; id = randomUUID().replaceAll("-", "").slice(0, 24);
   await service.saveBrief(uid, id, { expectedRevision: 0, brief: brief() }, true);
 });
-afterEach(async () => { await db.recursiveDelete(root()); });
+afterEach(async () => { vi.restoreAllMocks(); await db.recursiveDelete(root()); });
 afterAll(async () => { await deleteApp(app); });
 it("persists fact approval and invalidates it and campaign approval consistently after editing", async () => {
   await approvedFacts(); await service.saveDraft(uid, id, draft());
@@ -152,5 +152,99 @@ it("denies direct client mutation of server-owned guided projects", async () => 
     await expect(fs.deleteDoc(ref)).rejects.toMatchObject({ code: "permission-denied" });
     await expect(fs.setDoc(fs.doc(connection, `${project().path}/campaigns/current`), { status: "approved" })).rejects.toMatchObject({ code: "permission-denied" });
     await expect(fs.setDoc(fs.doc(connection, `${root().path}/projects/${"b".repeat(24)}`), { workspaceId: `personal_${uid}`, createdBy: uid, lifecycleStatus: "evidence_review", brief: brief() })).rejects.toMatchObject({ code: "permission-denied" });
+  } finally { await web.deleteApp(client); }
+});
+
+async function deleteCurrent(overrides: Record<string, unknown> = {}) {
+  const { deleteCompanionProject } = await import("../lib/companion/deletion");
+  const current = await service.read(uid, id);
+  return deleteCompanionProject(db, uid, id, { confirmation: `DELETE ${id}`, includeDerivedContent: true, expectedRevision: current.revision, expectedCampaignVersion: current.campaign?.version ?? 0, ...overrides });
+}
+it("deletes sources and derived draft history atomically, repeats safely, fences recreation and returns gone", async () => {
+  const { deleteCompanionProject } = await import("../lib/companion/deletion");
+  await approvedFacts(); await service.saveDraft(uid, id, draft());
+  const input = { confirmation: `DELETE ${id}`, includeDerivedContent: true, expectedRevision: 2, expectedCampaignVersion: 1 };
+  expect(await deleteCompanionProject(db, uid, id, input)).toMatchObject({ deleted: true, alreadyDeleted: false, accountDeleted: false });
+  expect((await project().get()).exists).toBe(false); expect(await project().listCollections()).toEqual([]);
+  expect(await deleteCompanionProject(db, uid, id, input)).toMatchObject({ alreadyDeleted: true });
+  await expect(service.read(uid, id)).rejects.toMatchObject({ status: 410 });
+  await expect(service.saveBrief(uid, id, { expectedRevision: 0, brief: brief() }, true)).rejects.toMatchObject({ status: 409 });
+  expect(Object.keys((await root().collection("companionDeletions").doc(id).get()).data()!).sort()).toEqual(["deletedAt", "projectId", "userId"]);
+});
+it("requires exact explicit confirmation and current revisions", async () => {
+  for (const input of [{ confirmation: "DELETE" }, { includeDerivedContent: false }, { expectedRevision: 999 }, { expectedCampaignVersion: 999 }]) await expect(deleteCurrent(input)).rejects.toThrow();
+  expect((await project().get()).exists).toBe(true);
+});
+it("handles interrupted deletion before commit and retries without partial loss", async () => {
+  const { deleteCompanionProject } = await import("../lib/companion/deletion");
+  const input = { confirmation: `DELETE ${id}`, includeDerivedContent: true, expectedRevision: 1, expectedCampaignVersion: 0 };
+  const original = db.runTransaction.bind(db);
+  vi.spyOn(db, "runTransaction").mockImplementationOnce(fn => original(async tx => { await fn(tx); throw new Error("Simulated process interruption before commit"); }));
+  await expect(deleteCompanionProject(db, uid, id, input)).rejects.toThrow(/interruption/);
+  expect((await project().get()).exists).toBe(true); expect((await project().collection("briefVersions").get()).size).toBe(1);
+  expect((await root().collection("companionDeletions").doc(id).get()).exists).toBe(false);
+  expect(await deleteCompanionProject(db, uid, id, input)).toMatchObject({ deleted: true });
+});
+it("concurrent deletion requests converge, including a lost successful response", async () => {
+  const { deleteCompanionProject } = await import("../lib/companion/deletion");
+  const input = { confirmation: `DELETE ${id}`, includeDerivedContent: true, expectedRevision: 1, expectedCampaignVersion: 0 };
+  const results = await Promise.all([deleteCompanionProject(db, uid, id, input), deleteCompanionProject(db, uid, id, input)]);
+  expect(results.every(r => r.deleted)).toBe(true); expect(results.filter(r => r.alreadyDeleted)).toHaveLength(1);
+  expect((await deleteCompanionProject(db, uid, id, input)).alreadyDeleted).toBe(true);
+});
+it("concurrent edit versus deletion cannot restore removed data", async () => {
+  const { deleteCompanionProject } = await import("../lib/companion/deletion");
+  const results = await Promise.allSettled([deleteCompanionProject(db, uid, id, { confirmation: `DELETE ${id}`, includeDerivedContent: true, expectedRevision: 1, expectedCampaignVersion: 0 }), service.saveBrief(uid, id, { expectedRevision: 1, brief: { ...brief(), tone: "new" } })]);
+  expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+  const deleted = (await root().collection("companionDeletions").doc(id).get()).exists;
+  expect((await project().get()).exists).toBe(!deleted);
+});
+it.each(["orders", "campaignApprovals", "placements", "siteDiagnosticReports", "jobs", "unknownFutureData"])("blocks deletion with %s without removing anything", async collection => {
+  await project().collection(collection).doc("protected").set({ status: "refunded", text: "KEEP" });
+  await expect(deleteCurrent()).rejects.toMatchObject({ status: 409 });
+  expect((await project().get()).exists).toBe(true); expect((await project().collection(collection).doc("protected").get()).data()?.text).toBe("KEEP");
+});
+it("blocks approved historical versions, linked jobs, unknown descendants and oversized trees", async () => {
+  const version = project().collection("campaigns").doc("current").collection("versions").doc("000001");
+  await version.set({ status: "approved" }); await expect(deleteCurrent()).rejects.toMatchObject({ status: 409 }); await version.delete();
+  const job = root().collection("intelligenceJobs").doc("outside"); await job.set({ projectId: id, status: "completed" }); await expect(deleteCurrent()).rejects.toMatchObject({ status: 409 }); await job.delete();
+  const nested = project().collection("briefVersions").doc("000001").collection("future").doc("item"); await nested.set({ secret: "synthetic" }); await expect(deleteCurrent()).rejects.toMatchObject({ status: 409 }); await nested.delete();
+  const batch = db.batch(); for (let i = 0; i < 101; i++) batch.set(project().collection("briefVersions").doc(`extra${i}`), { brief: brief() }); await batch.commit();
+  await expect(deleteCurrent()).rejects.toMatchObject({ status: 409 }); expect((await project().get()).exists).toBe(true);
+});
+it("isolates deletion by membership and owner including idempotent repeats", async () => {
+  const { deleteCompanionProject } = await import("../lib/companion/deletion");
+  const input = { confirmation: `DELETE ${id}`, includeDerivedContent: true, expectedRevision: 1, expectedCampaignVersion: 0 };
+  await expect(deleteCompanionProject(db, "stranger", id, input)).rejects.toMatchObject({ status: 403 });
+  await root().collection("members").doc(uid).update({ role: "member" }); await expect(deleteCurrent()).rejects.toMatchObject({ status: 403 });
+  await root().collection("members").doc(uid).update({ role: "owner" }); await deleteCurrent();
+  await root().collection("members").doc(uid).delete(); await expect(deleteCompanionProject(db, uid, id, input)).rejects.toMatchObject({ status: 403 });
+});
+
+it.each(["profiles/missing/privateSources/copy", "campaigns/current/versions/missing/privateSources/copy"])("does not report deletion for an orphan descendant at %s", async path => {
+  const orphan = db.doc(`${project().path}/${path}`); await orphan.set({ content: "KEEP_SYNTHETIC" });
+  await expect(deleteCurrent()).rejects.toMatchObject({ status: 409 });
+  expect((await orphan.get()).exists).toBe(true); expect((await project().get()).exists).toBe(true);
+});
+
+it("concurrent final approval versus deletion has one winner and preserves approval records", async () => {
+  const { deleteCompanionProject } = await import("../lib/companion/deletion");
+  await approvedFacts(); await service.saveDraft(uid, id, draft()); const current = await service.read(uid, id);
+  const results = await Promise.allSettled([
+    deleteCompanionProject(db, uid, id, { confirmation: `DELETE ${id}`, includeDerivedContent: true, expectedRevision: 2, expectedCampaignVersion: 1 }),
+    service.approveCampaign(uid, id, { expectedVersion: 1, digest: current.campaign!.digest }),
+  ]);
+  expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+  const deleted = (await root().collection("companionDeletions").doc(id).get()).exists;
+  expect((await project().collection("campaignApprovals").doc("current").get()).exists).toBe(!deleted);
+});
+it("direct client cannot recreate a deleted project or remove its deletion marker", async () => {
+  await deleteCurrent();
+  const web = await import("firebase/app"), fs = await import("firebase/firestore");
+  const client = web.initializeApp({ projectId: "demo-launch-order-lock", apiKey: "demo" }, `deleted-client-${randomUUID()}`);
+  try {
+    const connection = fs.getFirestore(client); fs.connectFirestoreEmulator(connection, "127.0.0.1", 18891, { mockUserToken: { sub: uid, user_id: uid } });
+    await expect(fs.setDoc(fs.doc(connection, project().path), { createdBy: uid, workspaceId: root().id, lifecycleStatus: "evidence_review" })).rejects.toMatchObject({ code: "permission-denied" });
+    await expect(fs.deleteDoc(fs.doc(connection, `${root().path}/companionDeletions/${id}`))).rejects.toMatchObject({ code: "permission-denied" });
   } finally { await web.deleteApp(client); }
 });

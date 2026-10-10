@@ -10,9 +10,9 @@ security/TTL setting, backup expiry, scheduler, or deployment was authorized.
   fail closed for a separately reviewed migration. Failed saves do not claim deletion.
 - Current brief, facts and saved drafts: no age-based deletion; retain until
   project deletion. Source removal does not erase derived facts or draft wording.
-  Those must be removed separately. A full project/account deletion workflow is
-  not exposed by this milestone, because paid/approval/report policy remains
-  undecided and recursive deletion needs its own reviewed operational workflow.
+  Those must be removed separately or through confirmed draft-project deletion.
+  Full account deletion and protected-project deletion remain blocked pending
+  paid/approval/report policy and a reviewed cross-system workflow.
 - Brief and campaign revision history: eligible after 30 days. Current project
   and current campaign are retained independently of history snapshots.
 - Companion operational logs: 30 days. Only a fixed event name and timestamps;
@@ -48,3 +48,40 @@ execution versus dry-run, source-history removal and oversized migration refusal
 current draft preservation, log content/expiry, protected-record holds, tenant
 isolation and direct-client bypass denial. Live cleanup and backup semantics are
 not validated by these tests.
+
+## Confirmed draft-project deletion
+
+The website now offers an explicit draft-only deletion action. The owner types
+`DELETE <project ID>` and acknowledges removal of derived facts/drafts. The
+server checks owner membership, exact project ownership and the displayed brief
+revision/campaign version. A successful transaction removes the bounded project
+and known source/fact/draft/history/log records from active Firestore storage.
+Deletion is not an MCP tool and is never triggered by retention maintenance.
+
+The operation is all-or-nothing: maximum 100 child documents, conservative 2 MB
+payload budget, no recursive purge. It blocks legacy URL projects, any order,
+approval or approved version, report/placement, linked job/request, unknown
+collection/descendant, orphan-parent tree or oversized project. Blocked projects
+are not partially erased. Those need an independently reviewed deletion plan.
+Concurrent normal app edits contend with deletion. Unexpected out-of-band Admin
+SDK writers are not covered by a client security boundary; pause administrative
+migrations before any eventual live deletion rollout.
+
+A server-only marker (owner UID, project ID, deletion time) remains outside the
+project to recognize retries and prevent recreation. It contains no customer
+source or draft content and has no automatic expiry; its disposition belongs in
+the still-pending account-deletion/restore policy. Repeat calls recheck ownership
+and confirm that no project tree remains. Interrupted pre-commit calls remove
+nothing; a lost success response can be retried. Reopening a deleted project
+returns HTTP 410, allowing the page to clear stale locally displayed content.
+
+Saved derived draft/fact content is removed with project deletion, while removing
+only a source still leaves derived content. Downloads, pasted ChatGPT content,
+external systems and backups are outside this active-storage operation.
+
+Full account deletion deliberately remains blocked (HTTP 409; no queue or
+mutation). Essential owner decisions: retain, anonymize or delete paid-order,
+approval and report records, and for how long; who handles external provider
+identity/grant removal; how backup restoration replays deletion markers. Until
+that policy and a tested cross-system identity workflow exist, neither the UI nor
+API claims to erase the Firebase account, OAuth mapping or all personal data.

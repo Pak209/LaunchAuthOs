@@ -31,7 +31,8 @@ service cloud.firestore {
     // parent must never unlock evidence that an existing order relies on.
     function projectIsEditable(workspaceId, projectId) {
       let project = /databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId);
-      return !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId)/orders/current)
+      return !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/companionDeletions/$(projectId))
+        && !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId)/orders/current)
         && (!exists(project) || (
           get(project).data.get('brief', null) == null
           && !(get(project).data.get('campaignStatus', '') in ['awaiting_payment', 'fulfillment'])

@@ -76,3 +76,9 @@ It does not substitute a serial in-memory database for Firestore rule evaluation
 or transaction contention.
 
 Companion coverage uses actual Admin SDK transactions and synthetic briefs: fact approval/history consistency and invalidation, concurrent approval/edit conflicts, identical-request deduplication, competing draft versions, every mutation frozen by pending/approved/canceled/refunded orders, and ownership/membership denial. It does not validate live OAuth or website cookies.
+
+Draft-project deletion coverage uses only synthetic demo records: explicit
+confirmation/current revisions, owner isolation, atomic interruption/retry,
+concurrent deletion/edit/approval, protected records and outside-project jobs,
+orphan descendants/unknown schema/size limits, and permanent recreation fencing.
+A successful test does not authorize live deletion or establish backup erasure.
