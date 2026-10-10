@@ -11,9 +11,11 @@
     "test:integration:firebase": "RUN_FIREBASE_INTEGRATION=1 node --env-file=.env.local ./node_modules/vitest/vitest.mjs run tests/firebase-live.integration.test.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@phosphor-icons/react": "^2.1.10",
     "firebase": "^12.18.0",
     "firebase-admin": "^14.5.0",
+    "jose": "^6.2.12",
     "next": "16.3.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",

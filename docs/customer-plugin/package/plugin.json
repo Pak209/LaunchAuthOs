@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "launchauth-customer",
+  "version": "0.1.0",
+  "description": "Build a launch brief, save conversation-produced drafts for website review, and retrieve campaign progress and placement outcomes."
+}

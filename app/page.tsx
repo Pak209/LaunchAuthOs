@@ -75,6 +75,7 @@ function TopBar({ activeView, hasIntelligence, persistence, localDraft, canSignO
     <header className="topbar">
       <div><h1>{activeView}</h1><p>{activeView === "Command Center" ? "Outcome-first overview. Understand momentum at a glance." : "Launch intelligence grounded in verified evidence."}</p></div>
       <div className="topbar-actions">
+        <a className="mode-button" href={projectId ? `/companion?project=${projectId}` : "/companion"}>Guided brief</a>
         {projects.length ? <select className="project-switcher" aria-label="Current project" value={projectId ?? ""} onChange={(event) => selectProject(event.target.value)}><option value="" disabled>Select project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select> : null}
         {projects.length ? <button className="mode-button" onClick={newProject}>New project</button> : null}
         <EvidenceBadge state={hasIntelligence ? (localDraft ? "LOCAL DRAFT" : persistence === "saved" ? "SAVED WORKSPACE" : "LOCAL ANALYSIS") : "GETTING STARTED"} tone={hasIntelligence && persistence === "saved" && !localDraft ? "positive" : "neutral"} />

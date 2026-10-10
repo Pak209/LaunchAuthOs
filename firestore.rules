@@ -33,7 +33,8 @@ service cloud.firestore {
       let project = /databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId);
       return !exists(/databases/$(database)/documents/workspaces/$(workspaceId)/projects/$(projectId)/orders/current)
         && (!exists(project) || (
-          !(get(project).data.get('campaignStatus', '') in ['awaiting_payment', 'fulfillment'])
+          get(project).data.get('brief', null) == null
+          && !(get(project).data.get('campaignStatus', '') in ['awaiting_payment', 'fulfillment'])
           && !(get(project).data.get('lifecycleStatus', '') in ['awaiting_payment', 'fulfillment'])
         ));
     }
@@ -68,11 +69,13 @@ service cloud.firestore {
       match /projects/{projectId} {
         allow read: if isMember(workspaceId);
         allow create: if canEdit(workspaceId)
+          && !request.resource.data.keys().hasAny(['brief', 'briefRevision', 'archivedAt', 'sourceHistorySanitized', 'sourcesExpiredAt'])
           && projectIsEditable(workspaceId, projectId)
           && request.resource.data.workspaceId == workspaceId
           && request.resource.data.createdBy == request.auth.uid
           && request.resource.data.lifecycleStatus in ['evidence_review', 'approved', 'draft_ready', 'campaign_approved', 'awaiting_payment', 'fulfillment'];
         allow update: if canEdit(workspaceId)
+          && !request.resource.data.keys().hasAny(['brief', 'briefRevision', 'archivedAt', 'sourceHistorySanitized', 'sourcesExpiredAt'])
           && projectIsEditable(workspaceId, projectId)
           && request.resource.data.workspaceId == resource.data.workspaceId
           && request.resource.data.createdBy == resource.data.createdBy

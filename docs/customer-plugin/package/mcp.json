@@ -1,0 +1,17 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "launchauth-customer": {
+      "type": "streamable-http",
+      "url": "https://replace-before-connecting.invalid/api/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "baseScopes": ["launch:projects:read", "launch:status:read", "launch:reports:read", "launch:brief:read", "launch:drafts:write"]
+          }
+        }
+      }
+    }
+  }
+}

@@ -139,6 +139,15 @@ function projectRechecks() {
   return standaloneReads.calls.filter(({ path }) => path === projectPath || path === orderPath);
 }
 
+it("rejects fulfillment for an archived approved project without creating orders or jobs", async () => {
+  const db = fixture();
+  db.seed(projectPath, { ...db.read(projectPath), archivedAt: timestamp });
+  const before = projectTree(db);
+  await expect(prepare(db)).rejects.toThrow("Restore this archived project before preparing fulfillment.");
+  expect(projectTree(db)).toEqual(before);
+  expect(db.rows.has(orderPath)).toBe(false);
+});
+
 describe("evidence saves invalidate current campaign approval", () => {
   it.each(["evidence_review", "approved", "campaign"] as const)("returns normalized evidence and a draft campaign for %s, without altering immutable history", async (status) => {
     const db = fixture();
@@ -372,4 +381,12 @@ describe.each(versionMutators)("$name immutable versions", ({ save }) => {
     await expect(save(db)).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/version limit/i) });
     expect(projectTree(db)).toEqual(before);
   });
+});
+
+it("blocks legacy evidence edits for guided brief projects", async () => {
+  const db = fixture();
+  db.seed(projectPath, { ...db.read(projectPath), brief: { company: "Acme" }, briefRevision: 1 });
+  const before = db.read(projectPath);
+  await expect(updateProjectCampaign(db as unknown as Firestore, user, projectId, analysis().profile, analysis().profile.claims, "approved")).rejects.toThrow(/guided brief/);
+  expect(db.read(projectPath)).toEqual(before);
 });

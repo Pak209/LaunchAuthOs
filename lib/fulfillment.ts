@@ -271,6 +271,7 @@ export async function prepareFulfillment(
       transaction.get(project), transaction.get(order), transaction.get(approval), transaction.get(project.collection("campaigns").doc("current")),
     ]);
     if (!projectSnapshot.exists || projectSnapshot.data()?.createdBy !== uid) throw new Error("The project was not found.");
+    if (projectSnapshot.data()?.archivedAt) throw new Error("Restore this archived project before preparing fulfillment.");
     const currentCampaign = currentCampaignSnapshot.data() as CampaignDraft | undefined;
     if (!currentCampaign || currentCampaign.status !== "approved" || campaignDigest(currentCampaign) !== campaignDigest(campaign)) throw new Error("The campaign changed. Review and approve the current campaign before fulfillment.");
     assertCampaignAttestation(campaign, approvalSnapshot.data() as CampaignApprovalAttestation | undefined, uid);

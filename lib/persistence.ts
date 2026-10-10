@@ -20,6 +20,7 @@ import type { BrandProfile, CampaignDraft, Claim, EvidenceSnapshot, FindingKind,
 import { invalidateCampaignApproval, type EvidenceSaveOutcome } from "./evidence-save-state";
 
 type StoredProject = {
+  brief?: unknown;
   workspaceId: string;
   createdBy: string;
   name: string;
@@ -39,6 +40,7 @@ export class ProjectMutationConflictError extends Error {
 }
 
 function assertProjectEditable(stored: Partial<StoredProject> | undefined, orderExists: boolean) {
+  if (stored?.brief) throw new ProjectMutationConflictError("Use the guided brief and review editor for this project.");
   if (orderExists || [stored?.campaignStatus, stored?.lifecycleStatus].some((status) => status === "awaiting_payment" || status === "fulfillment")) {
     throw new ProjectMutationConflictError("This project has a fulfillment order. Its evidence and campaign are locked, including after cancellation or refund.");
   }

@@ -1,3 +1,4 @@
+import type { Brief } from "./companion/model";
 import { createHash, randomUUID } from "node:crypto";
 import { FieldValue, type DocumentReference, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { analyzeCompany } from "./analyze";
@@ -27,7 +28,7 @@ type IntelligenceJob = IntelligenceJobStatus & {
   nextAttemptAt?: string;
 };
 
-type ProjectData = { workspaceId: string; createdBy: string; url: string; profile: BrandProfile; claims: Claim[]; updatedAtIso?: string };
+type ProjectData = { brief?: Brief; workspaceId: string; createdBy: string; url: string; profile: BrandProfile; claims: Claim[]; updatedAtIso?: string };
 type WorkerDependencies = {
   analyze?: typeof analyzeCompany;
   generate?: typeof generateCampaignAssets;
@@ -57,10 +58,11 @@ function assertMember(member: Record<string, unknown> | undefined, userId: strin
   if (member?.userId !== userId || !["owner", "admin", "member"].includes(String(member.role))) throw new Error("Workspace access denied.");
 }
 function assertProjectOwner(project: ProjectData | undefined, userId: string, workspaceId: string) {
+  if (project && (project as ProjectData & { archivedAt?: string }).archivedAt) throw new Error("Restore this archived project before generating.");
   if (project && (project.createdBy !== userId || project.workspaceId !== workspaceId)) throw new Error("Project access denied.");
 }
 function assertApproved(project: ProjectData) {
-  if (!project.claims?.length || project.claims.some((claim) => !claim.approved)) throw new Error("Every evidence claim must be approved before campaign generation.");
+  if (!project.claims?.length || (project.brief ? !project.claims.some(claim => claim.approved && claim.state !== "ASSUMED") : project.claims.some((claim) => !claim.approved))) throw new Error("Every evidence claim must be approved before campaign generation.");
 }
 export function publicIntelligenceJob(job: IntelligenceJob): IntelligenceJobStatus {
   const { id, projectId, type, status, attempts, createdAt, updatedAt, url, message } = job;
@@ -80,6 +82,7 @@ export async function enqueueIntelligenceJob(db: Firestore, userId: string, inpu
     assertMember(member.data(), userId);
     const project = projectSnapshot.data() as ProjectData | undefined;
     assertProjectOwner(project, userId, target.workspaceId);
+    if (input.type === "analysis" && project?.brief) throw new Error("This guided brief must be edited in the companion; reanalysis is not approved.");
     if (order.exists) throw new Error("This project already has a fulfillment order. Create a new project for a new campaign.");
     const activeId = lockSnapshot.data()?.jobId;
     const active = typeof activeId === "string" ? (await transaction.get(target.workspace.collection("intelligenceJobs").doc(activeId))).data() as IntelligenceJob | undefined : undefined;
@@ -221,7 +224,7 @@ export async function runQueuedIntelligenceJobs(db: Firestore, dependencies: Wor
       if (!claimed) return;
       intelligenceProcessed++;
       const { job, project } = claimed;
-      const output = job.type === "analysis" ? await (dependencies.analyze ?? analyzeCompany)(job.url) : await (dependencies.generate ?? generateCampaignAssets)(project!.profile, project!.claims, job.userId);
+      const output = job.type === "analysis" ? await (dependencies.analyze ?? analyzeCompany)(job.url) : (project!.brief ? await (dependencies.generate ?? generateCampaignAssets)(project!.profile, project!.claims.filter(c => c.approved && c.state !== "ASSUMED"), job.userId, undefined, project!.brief) : await (dependencies.generate ?? generateCampaignAssets)(project!.profile, project!.claims, job.userId));
       await commitResult(db, snapshot.ref, job, output, now());
     } catch {
       if (claimed) await failJob(db, snapshot.ref, claimed.job.runToken, now());

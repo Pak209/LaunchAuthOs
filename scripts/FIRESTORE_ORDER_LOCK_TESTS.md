@@ -33,7 +33,8 @@ deleted by the launcher.
 
 The isolated Vitest configuration runs only
 `tests/firestore-order-lock.integration.test.ts` and
-`tests/firestore-site-diagnostics.integration.test.ts`. Ordinary `npm test` continues to
+`tests/firestore-site-diagnostics.integration.test.ts`, and
+`tests/firestore-companion.integration.test.ts`. Ordinary `npm test` continues to
 exclude integration tests. Running these tests against an unexpected host/project,
 or without `RUN_FIRESTORE_ORDER_LOCK=1`, fails before constructing SDK clients.
 
@@ -73,3 +74,5 @@ The suite uses the existing SDK's documented [`connectFirestoreEmulator` mock to
 and the Admin SDK's [emulator connection](https://firebase.google.com/docs/emulator-suite/connect_firestore#admin_sdks).
 It does not substitute a serial in-memory database for Firestore rule evaluation
 or transaction contention.
+
+Companion coverage uses actual Admin SDK transactions and synthetic briefs: fact approval/history consistency and invalidation, concurrent approval/edit conflicts, identical-request deduplication, competing draft versions, every mutation frozen by pending/approved/canceled/refunded orders, and ownership/membership denial. It does not validate live OAuth or website cookies.

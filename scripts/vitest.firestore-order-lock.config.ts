@@ -5,7 +5,7 @@ export default defineConfig({
   root: fileURLToPath(new URL("../", import.meta.url)),
   test: {
     environment: "node",
-    include: ["tests/firestore-order-lock.integration.test.ts", "tests/firestore-site-diagnostics.integration.test.ts"],
+    include: ["tests/firestore-companion.integration.test.ts", "tests/firestore-order-lock.integration.test.ts", "tests/firestore-site-diagnostics.integration.test.ts"],
     fileParallelism: false,
     testTimeout: 30_000,
     hookTimeout: 30_000,

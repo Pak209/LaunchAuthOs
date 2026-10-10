@@ -88,7 +88,7 @@ export class MemoryFirestore {
       const result = await fn({
         get: async (ref) => {
           if (writes.length) throw new Error("Firestore transactions must read before writing");
-          return new Snapshot(ref);
+          return ref instanceof Query ? await ref.get() as any : new Snapshot(ref);
         },
         create: (ref, data) => { writes.push({ kind: "create", ref, data }); },
         update: (ref, data) => { writes.push({ kind: "update", ref, data }); },

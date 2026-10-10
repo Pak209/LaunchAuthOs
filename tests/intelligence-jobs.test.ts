@@ -224,3 +224,15 @@ describe("durable intelligence jobs", () => {
     expect(db.read(jobPath(job.id)).status).toBe("failed");
   });
 });
+
+
+it("prevents reanalysis of a guided brief and passes its context only to explicit generation", async () => {
+  const db = database(true);
+  const brief = { company: "Example", product: "Software", angle: "A real announcement", goal: "Inform", audience: "Teams", tone: "Direct", cta: "Read", announcementDate: "", embargo: "", requiredFacts: "", excludedFacts: "", references: "", sources: [], facts: [] };
+  db.seed(projectPath, { ...db.read(projectPath), brief, briefRevision: 1 });
+  await expect(enqueueIntelligenceJob(db.asFirestore(), userId, { type: "analysis", url: companyUrl })).rejects.toThrow(/guided brief/);
+  await enqueueIntelligenceJob(db.asFirestore(), userId, { type: "campaign_generation", projectId }, initialTime);
+  const generate = vi.fn(async () => generated());
+  await runQueuedIntelligenceJobs(db.asFirestore(), { generate, now: () => initialTime });
+  expect(generate).toHaveBeenCalledWith(result().profile, result().profile.claims, userId, undefined, brief);
+});
