@@ -24,6 +24,7 @@ beforeAll(() => {
   app = initializeApp({ projectId: "demo-launch-order-lock" }, "fulfillment-emulator"); db = getFirestore(app);
 });
 beforeEach(async () => {
+  await db.doc("deploymentAccess/current").set({ mode: "standard" });
   uid = `delivery_${randomUUID().replaceAll("-", "")}`; id = randomUUID().replaceAll("-", "").slice(0, 24);
   const now = new Date().toISOString();
   const campaign: CampaignDraft = { version: 1, status: "approved", model: "synthetic", generatedAt: now, updatedAt: now,

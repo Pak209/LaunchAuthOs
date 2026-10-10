@@ -7,6 +7,8 @@ credentials, hosting, ChatGPT connection, marketplace installation or publicatio
 has been created. This is the customer product integration, separate from the
 Lex/Go collaboration workflow. The website retains Firebase email/password authentication; request identity/cache checks and session input handling are additionally hardened.
 
+See [staging access and migration requirements](STAGING-ACCESS.md) before any rules or hosting deployment.
+
 ## Scope and architecture
 
 `POST /api/mcp` uses the official TypeScript MCP SDK's stateless Streamable HTTP

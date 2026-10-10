@@ -10,6 +10,10 @@ runConfig:
   cpu: 1
   memoryMiB: 512
 env:
+  - variable: DEPLOYMENT_ACCESS_MODE
+    value: "restricted"
+  - variable: STAGING_ALLOWED_FIREBASE_UIDS
+    value: "" # Fail closed until real owner-approved UIDs and matching policy exist.
   - variable: CUSTOMER_MCP_ENABLED
     value: "false"
   - variable: PRNOW_SUBMIT_ENABLED

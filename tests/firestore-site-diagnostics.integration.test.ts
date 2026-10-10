@@ -82,6 +82,7 @@ beforeAll(() => {
 });
 
 beforeEach(async () => {
+  await db.doc("deploymentAccess/current").set({ mode: "standard" });
   clock = startedAt;
   uid = `diag_test_${randomUUID().replaceAll("-", "")}`;
   projectId = randomUUID().replaceAll("-", "").slice(0, 24);

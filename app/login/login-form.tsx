@@ -5,7 +5,7 @@ import { ArrowRight, CirclesFour, LockKey, ShieldCheck } from "@phosphor-icons/r
 import { createUserWithEmailAndPassword, inMemoryPersistence, sendEmailVerification, sendPasswordResetEmail, setPersistence, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { getFirebaseClientAuth } from "@/lib/firebase/client";
 
-export default function LoginForm({ initialError }: { initialError: string }) {
+export default function LoginForm({ initialError, allowSignup }: { initialError: string; allowSignup: boolean }) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -19,6 +19,7 @@ export default function LoginForm({ initialError }: { initialError: string }) {
     setNotice("");
     setStatus("loading");
     try {
+      if (mode === "signup" && !allowSignup) throw new Error("Registration is disabled for this private workspace.");
       const auth = getFirebaseClientAuth();
       await setPersistence(auth, inMemoryPersistence);
       const credential = mode === "signin"
@@ -73,9 +74,9 @@ export default function LoginForm({ initialError }: { initialError: string }) {
             {notice ? <p className="auth-notice" role="status">{notice}</p> : null}
             <button className="primary-button" disabled={status === "loading"}>{status === "loading" ? "Please wait…" : mode === "signin" ? "Sign in" : "Create workspace"}<ArrowRight size={15} /></button>
           </form>
-          <button className="auth-mode" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); setStatus("idle"); }}>
+          {allowSignup ? <button className="auth-mode" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); setStatus("idle"); }}>
             {mode === "signin" ? "New to Launch Auth? Create a workspace" : "Already have an account? Sign in"}
-          </button>
+          </button> : <p>Private test workspace. Sign in with an approved test account; registration is disabled here.</p>}
           {mode === "signin" ? <button className="auth-reset" onClick={() => void resetPassword()}>Forgot your password?</button> : null}
           <div className="auth-security"><LockKey size={14} />Firebase identity tokens are kept in HTTP-only session cookies.</div>
         </div>

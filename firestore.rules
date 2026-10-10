@@ -2,8 +2,32 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Server-owned deployment policy prevents bypassing a restricted pilot via
+    // the public Firebase client API. Missing/malformed policy fails closed.
+    function validAllowedUid(ids, index) {
+      return ids.size() <= index || (ids[index] is string && ids[index].size() > 0 && ids[index].size() <= 128 && ids[index].matches('^[^/[:space:][:cntrl:]]+$'));
+    }
+    function deploymentAllowed() {
+      let path = /databases/$(database)/documents/deploymentAccess/current;
+      let policy = get(path).data;
+      return exists(path) && (
+        policy.get('mode', '') == 'standard'
+        || (policy.get('mode', '') == 'restricted'
+          && policy.get('allowedUids', null) is list
+          && policy.allowedUids.size() > 0 && policy.allowedUids.size() <= 10
+          && validAllowedUid(policy.allowedUids, 0) && validAllowedUid(policy.allowedUids, 1)
+          && validAllowedUid(policy.allowedUids, 2) && validAllowedUid(policy.allowedUids, 3)
+          && validAllowedUid(policy.allowedUids, 4) && validAllowedUid(policy.allowedUids, 5)
+          && validAllowedUid(policy.allowedUids, 6) && validAllowedUid(policy.allowedUids, 7)
+          && validAllowedUid(policy.allowedUids, 8) && validAllowedUid(policy.allowedUids, 9)
+          && request.auth.uid in policy.allowedUids)
+      );
+    }
     function signedIn() {
-      return request.auth != null;
+      return request.auth != null && deploymentAllowed();
+    }
+    match /deploymentAccess/{policyId} {
+      allow read, write: if false;
     }
 
     function membershipPath(workspaceId) {

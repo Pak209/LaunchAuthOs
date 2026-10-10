@@ -1,3 +1,4 @@
+import { localAnalysisAllowed } from "@/lib/deployment-access";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { analyzeCompany } from "@/lib/analyze";
@@ -18,6 +19,7 @@ export async function POST(request: Request) {
     assertSameOrigin(request);
     const body = requestSchema.parse(await request.json());
     if (!isFirebaseConfigured()) {
+      if (!localAnalysisAllowed(request)) return NextResponse.json({ error: "Analysis unavailable until authentication is configured." }, { status: 503, headers: { "cache-control": "no-store" } });
       await enforceRateLimit(clientRateLimitKey(request), "analyze-local", 5, 60);
       const result = await analyzeCompany(body.url);
       return NextResponse.json({ ...result, persistence: "local" });

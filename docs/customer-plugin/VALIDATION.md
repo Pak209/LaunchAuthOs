@@ -223,3 +223,23 @@ were created.
 
 See [completion matrix](../COMPLETION-MATRIX.md) and
 [owner checklist](../OWNER-ACTIONS.md). Historical counts above remain historical.
+
+## Staging publication blockers — local fix
+
+Added restricted deployment access at verified Firebase session and mapped MCP
+identity boundaries, plus a server-owned Firestore policy enforced by client
+rules. Missing/invalid policy denies direct Web SDK/REST access, including signup
+users attempting to bootstrap their own workspace. Deployed standard mode also
+requires a matching explicit policy. Production/unknown runtimes default to
+restricted; approved UID values and policy remain unconfigured.
+
+Missing Firebase configuration now rejects analysis before crawling; local demo
+analysis requires explicit development/loopback/exact-Origin opt-in. Restricted
+login omits registration. This does not disable provider signup APIs: that remains
+a separate cloud approval. See [staging access/migration](STAGING-ACCESS.md).
+
+Local validation: 599 unit tests / 43 files; typecheck and production build;
+101 actual Firestore emulator tests / 6 files, including 15 deployment-policy
+cases; five offline plugin preflight tests. Independent review found and closed a
+standard-mode policy mismatch and reran 15 access/session tests successfully.
+No live settings/accounts, credentials, source upload or deployment were made.

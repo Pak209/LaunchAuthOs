@@ -1,3 +1,4 @@
+import { assertDeploymentAccess } from "../deployment-access";
 import { deleteApp, initializeServerApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
@@ -28,6 +29,7 @@ export async function createAuthenticatedFirebaseServerApp(idToken: string, requ
     const auth = getAuth(app);
     await auth.authStateReady();
     if (!auth.currentUser || auth.currentUser.uid !== claims.sub) throw new Error("Authentication required.");
+    await assertDeploymentAccess(auth.currentUser.uid);
     return { app, auth, user: auth.currentUser, db: getFirestore(app) };
   } catch {
     // Request-lifetime instances are released by Firebase's finalizer. Explicit

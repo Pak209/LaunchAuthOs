@@ -1,12 +1,12 @@
 import { afterEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ authenticate: vi.fn(async () => ({})) }));
-vi.mock("@/lib/firebase/config", () => ({ FIREBASE_SESSION_COOKIE: "session", isFirebaseConfigured: () => true }));
+const mocks = vi.hoisted(() => ({ authenticate: vi.fn(async () => ({})), configured: true }));
+vi.mock("@/lib/firebase/config", () => ({ FIREBASE_SESSION_COOKIE: "session", isFirebaseConfigured: () => mocks.configured }));
 vi.mock("@/lib/firebase/server", () => ({ createAuthenticatedFirebaseServerApp: mocks.authenticate }));
 vi.mock("@/lib/bounded-json", async () => import("../lib/bounded-json"));
 import { POST } from "../app/api/auth/session/route";
 const url = "https://launch.example/api/auth/session";
 function request(body: string, origin: string | null = "https://launch.example", contentType = "application/json") { return new Request(url, { method: "POST", headers: { "content-type": contentType, ...(origin ? { origin } : {}) }, body }); }
-afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); });
+afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); mocks.configured = true; });
 it("rejects missing/foreign origins and nonJSON before authentication", async () => {
   for (const origin of [null, "https://foreign.example"]) expect((await POST(request("{}", origin))).status).toBe(403);
   expect((await POST(request("{}", "https://launch.example", "text/plain"))).status).toBe(415);
@@ -27,4 +27,9 @@ it("never sets a cookie or exposes provider errors on verification failure", asy
   mocks.authenticate.mockRejectedValueOnce(new Error("PRIVATE_PROVIDER_DETAIL"));
   const response = await POST(request(JSON.stringify({ idToken: "synthetic".repeat(20) })));
   expect(response.status).toBe(401); expect(response.headers.get("set-cookie")).toBeNull(); expect(await response.text()).not.toContain("PRIVATE_PROVIDER_DETAIL");
+});
+
+it("missing Firebase configuration cannot issue session cookies", async () => {
+  mocks.configured = false; const response = await POST(request(JSON.stringify({ idToken: "synthetic".repeat(20) })));
+  expect(response.status).toBe(503); expect(response.headers.get("set-cookie")).toBeNull(); expect(mocks.authenticate).not.toHaveBeenCalled();
 });

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initializeServerApp, deleteApp, type FirebaseApp } from "firebase/app";
-const state = vi.hoisted(() => ({ getAuth: vi.fn(), getFirestore: vi.fn(), adminEnabled: false, verifyIdToken: vi.fn() }));
+const state = vi.hoisted(() => ({ getAuth: vi.fn(), getFirestore: vi.fn(), adminEnabled: false, verifyIdToken: vi.fn(), policy: { mode: "restricted", allowedUids: ["alice"] } }));
 vi.mock("firebase/auth", () => ({ getAuth: state.getAuth }));
 vi.mock("firebase/firestore", () => ({ getFirestore: state.getFirestore }));
-vi.mock("../lib/firebase/admin", () => ({ isFirebaseAdminExplicitlyConfigured: () => state.adminEnabled, getFirebaseAdminApp: () => ({}) }));
+vi.mock("../lib/firebase/admin", () => ({ isFirebaseAdminExplicitlyConfigured: () => state.adminEnabled, getFirebaseAdminApp: () => ({}), getFirebaseAdminDb: () => ({ doc: () => ({ get: async () => ({ data: () => state.policy }) }) }) }));
 vi.mock("firebase-admin/auth", () => ({ getAuth: () => ({ verifyIdToken: state.verifyIdToken }) }));
 vi.mock("next/headers", () => ({ cookies: vi.fn() }));
 vi.mock("../lib/firebase/config", () => ({ FIREBASE_SESSION_COOKIE: "launch_auth_session", getFirebaseConfig: () => ({ apiKey: "synthetic-key", projectId: "synthetic-session-boundary" }) }));
@@ -11,7 +11,7 @@ import { createAuthenticatedFirebaseServerApp } from "../lib/firebase/server";
 const apps: FirebaseApp[] = [];
 const token = (signature: string, sub = "synthetic-user", exp = 4102444800) => `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(JSON.stringify({ exp, iat: 1600000000, auth_time: 1600000000, iss: "https://securetoken.google.com/synthetic-session-boundary", aud: "synthetic-session-boundary", sub })).toString("base64url")}.${signature}`;
 beforeEach(() => { state.adminEnabled = false; });
-afterEach(async () => { for (const app of apps.splice(0)) await deleteApp(app); vi.clearAllMocks(); });
+afterEach(async () => { for (const app of apps.splice(0)) await deleteApp(app); vi.clearAllMocks(); vi.unstubAllEnvs(); });
 describe("Firebase server session boundaries", () => {
   it("fails closed when SDK's 32-bit cache key collides with another session", async () => {
     // Aa and BB collide under the installed SDK's polynomial hash. No network,
@@ -78,4 +78,12 @@ describe("Firebase server session boundaries", () => {
     expect(state.getAuth).toHaveBeenCalledTimes(1);
   });
 
+});
+
+it("blocks verified but unapproved Firebase sessions before returning a database context", async () => {
+  vi.stubEnv("DEPLOYMENT_ACCESS_MODE", "restricted"); vi.stubEnv("STAGING_ALLOWED_FIREBASE_UIDS", "alice"); state.adminEnabled = true;
+  state.verifyIdToken.mockImplementation(async access => ({ uid: JSON.parse(Buffer.from(access.split(".")[1], "base64url").toString()).sub }));
+  state.getAuth.mockImplementation(app => ({ currentUser: { uid: JSON.parse(Buffer.from(app.settings.authIdToken.split(".")[1], "base64url").toString()).sub }, authStateReady: async () => {} }));
+  await expect(createAuthenticatedFirebaseServerApp(token("denied-staging", "bob"))).rejects.toThrow("Authentication required."); expect(state.getFirestore).not.toHaveBeenCalled();
+  const context = await createAuthenticatedFirebaseServerApp(token("allowed-staging", "alice")); apps.push(context.app); expect(context.user.uid).toBe("alice");
 });

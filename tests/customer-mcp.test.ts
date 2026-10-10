@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWTVerifyGetKey } from "jose";
 import { authenticate, configFromEnv, mappingId, metadata, type Config } from "../lib/customer-mcp/auth";
 import { CustomerStore } from "../lib/customer-mcp/store";
@@ -102,4 +102,13 @@ describe("companion MCP mutation boundary", () => {
     const invalid = await (await rpc(f.store, "tools/call", { name: "save_campaign_draft", arguments: { ...args, approved: true } }, await token({ scope: "launch:drafts:write" }))).json();
     expect(invalid.result.isError).toBe(true); expect(save).toHaveBeenCalledTimes(1);
   });
+});
+
+afterEach(() => vi.unstubAllEnvs());
+it("MCP mapping cannot bypass the deployment UID policy", async () => {
+  vi.stubEnv("DEPLOYMENT_ACCESS_MODE", "restricted"); vi.stubEnv("K_SERVICE", "synthetic-host"); vi.stubEnv("STAGING_ALLOWED_FIREBASE_UIDS", "bob");
+  const f = fixture(); f.rows.set("deploymentAccess/current", { mode: "restricted", allowedUids: ["alice"] });
+  expect((await rpc(f.store, "tools/list", {}, await token({ userId: "bob" }))).status).toBe(403);
+  vi.stubEnv("STAGING_ALLOWED_FIREBASE_UIDS", "alice"); expect((await rpc(f.store, "tools/list", {}, await token())).status).toBe(200);
+  f.rows.delete("deploymentAccess/current"); expect((await rpc(f.store, "tools/list", {}, await token())).status).toBe(403);
 });

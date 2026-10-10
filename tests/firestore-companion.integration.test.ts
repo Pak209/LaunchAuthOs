@@ -16,6 +16,7 @@ beforeAll(() => {
   app = initializeApp({ projectId: "demo-launch-order-lock" }, "companion-emulator"); db = getFirestore(app); service = new CompanionService(db);
 });
 beforeEach(async () => {
+  await db.doc("deploymentAccess/current").set({ mode: "standard" });
   uid = `companion_${randomUUID().replaceAll("-", "")}`; id = randomUUID().replaceAll("-", "").slice(0, 24);
   await service.saveBrief(uid, id, { expectedRevision: 0, brief: brief() }, true);
 });

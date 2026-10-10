@@ -95,6 +95,7 @@ beforeAll(() => {
 });
 
 beforeEach(async () => {
+  await admin.doc("deploymentAccess/current").set({ mode: "standard" });
   const suffix = randomUUID().replaceAll("-", "");
   workspaceId = `order_lock_${suffix}`;
   projectPath = `workspaces/${workspaceId}/projects/${suffix.slice(0, 24)}`;

@@ -86,3 +86,9 @@ orphan descendants/unknown schema/size limits, and permanent recreation fencing.
 A successful test does not authorize live deletion or establish backup erasure.
 
 Fulfillment coverage uses real emulator transactions with synthetic supplier and URL responses: dispatch/reconciliation, package publication/refunds, independent status persistence, and bounded verification recovery. Recommendation coverage verifies snapshot fences, approval/export, tenant isolation and editorial-history deletion. Neither suite contacts a supplier, analytics provider or customer site.
+
+Deployment policy coverage (`firestore-deployment-access.integration.test.ts`)
+checks missing/malformed policy, approved/denied/anonymous callers and direct
+client attempts to bootstrap workspaces or alter the server-owned policy. Other
+suites explicitly seed standard policy in the demo emulator. Deploying the new
+rules requires an approved matching policy document; none was created live.

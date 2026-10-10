@@ -1,3 +1,4 @@
+import { assertDeploymentAccess } from "../deployment-access";
 import { FieldPath, type Firestore, type Query } from "firebase-admin/firestore";
 import { CompanionService } from "../companion/service";
 import { AccessError, mappingId } from "./auth";
@@ -17,7 +18,11 @@ export class CustomerStore {
   async resolve(issuer: string, subject: string) {
     const data = (await this.db.doc(`customerMcpLinks/${mappingId(issuer, subject)}`).get()).data();
     if (!data || data.enabled !== true || data.issuer !== issuer || data.subject !== subject || typeof data.firebaseUid !== "string") return null;
-    try { return await this.activeUser(data.firebaseUid) ? data.firebaseUid : null; } catch { return null; }
+    try {
+      if (!await this.activeUser(data.firebaseUid)) return null;
+      await assertDeploymentAccess(data.firebaseUid, async () => (await this.db.doc("deploymentAccess/current").get()).data());
+      return data.firebaseUid;
+    } catch { return null; }
   }
   private async workspace(uid: string) {
     const ref = this.db.doc(`workspaces/personal_${uid}`);
