@@ -45,10 +45,11 @@ export async function applyCompanionRetention(db: Firestore, uid: string, id: st
     const protectedRecords = !!(orders.size || approvedVersions.size || approvals.size || placements.size || reports.size || campaign.data()?.status === "approved" || [data.campaignStatus, data.lifecycleStatus].some(s => ["awaiting_payment", "fulfillment", "campaign_approved"].includes(s)));
     const briefHistory = !protectedRecords ? await tx.get(project.collection("briefVersions").where("savedAt", "<=", cutoff).limit(50)) : null;
     const campaignHistory = !protectedRecords ? await tx.get(project.collection("campaigns").doc("current").collection("versions").where("updatedAt", "<=", cutoff).limit(50)) : null;
+    const recommendationHistory = !protectedRecords ? await tx.get(project.collection("contentRecommendationVersions").where("reviewedAt", "<=", cutoff).limit(50)) : null;
     const archivedAt = typeof data.archivedAt === "string" ? Date.parse(data.archivedAt) : NaN;
     const expireSources = !protectedRecords && Number.isFinite(archivedAt) && archivedAt <= now - RETENTION_MS && !!data.brief.sources?.length;
     const legacy = expireSources ? await legacySourceHistory(tx, project, data) : [];
-    const history = [...(briefHistory?.docs ?? []), ...(campaignHistory?.docs ?? []).filter(d => d.data().status !== "approved")];
+    const history = [...(recommendationHistory?.docs ?? []), ...(briefHistory?.docs ?? []), ...(campaignHistory?.docs ?? []).filter(d => d.data().status !== "approved")];
     if (options.execute === true) {
       const deleting = new Set(history.map(d => d.ref.path));
       for (const d of legacy) if (!deleting.has(d.ref.path)) tx.update(d.ref, { brief: { ...d.data().brief, sources: [] } });

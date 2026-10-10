@@ -110,6 +110,41 @@ describe("distribution provider boundary", () => {
     await expect(provider.cancel("release_123")).resolves.toEqual({ canceled: true });
   });
 
+  it("keeps distributed separate from publication and preserves partial package credit outcomes", async () => {
+    configurePrNow();
+    const provider = new PrNowDistributionProvider(vi.fn(async () => Response.json({ data: {
+      status: "distributed", packages: [
+        { package: "one", state: "published" },
+        { package: "two", state: "rejected", creditsRefunded: 4, reason: "Editorial rejection" },
+      ],
+    } })));
+    await expect(provider.status("release_123")).resolves.toMatchObject({ status: "processing", packageOutcomes: [
+      { package: "one", state: "published" },
+      { package: "two", state: "rejected", creditsRefunded: 4, reason: "Editorial rejection" },
+    ] });
+  });
+
+  it("captures partial live URLs without accepting credential URLs or invented credit amounts", async () => {
+    configurePrNow();
+    const provider = new PrNowDistributionProvider(vi.fn(async () => Response.json({ data: { status: "in_progress", packages: [
+      { package: "one", state: "live", liveUrl: "https://news.example/early" },
+      { package: "two", state: "held", liveUrl: "https://news.example/not-live", creditsRefunded: null },
+      { package: "three", state: "live", liveUrl: "https://secret:password@news.example/private", creditsRefunded: "4" },
+    ] } })));
+    const result = await provider.status("release_123");
+    expect(result.packageOutcomes).toEqual([
+      { package: "one", state: "live", liveUrl: "https://news.example/early" },
+      { package: "two", state: "held" }, { package: "three", state: "live" },
+    ]);
+  });
+
+  it("does not treat pending retraction as completed cancellation or a confirmed refund", async () => {
+    configurePrNow();
+    const provider = new PrNowDistributionProvider(vi.fn(async () => Response.json({ data: { status: "pending" } })));
+    await expect(provider.cancel("release_123")).resolves.toEqual({ canceled: false });
+    await expect(provider.refund("release_123")).resolves.toEqual({ requested: false });
+  });
+
   it("forces human reconciliation when a submit response is ambiguous", async () => {
     configurePrNow();
     const provider = new PrNowDistributionProvider(vi.fn(async () => { throw new Error("connection reset"); }) as typeof fetch);

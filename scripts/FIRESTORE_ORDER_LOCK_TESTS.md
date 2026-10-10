@@ -34,7 +34,9 @@ deleted by the launcher.
 The isolated Vitest configuration runs only
 `tests/firestore-order-lock.integration.test.ts` and
 `tests/firestore-site-diagnostics.integration.test.ts`, and
-`tests/firestore-companion.integration.test.ts`. Ordinary `npm test` continues to
+`tests/firestore-companion.integration.test.ts`,
+`tests/firestore-fulfillment.integration.test.ts`, and
+`tests/firestore-content-recommendations.integration.test.ts`. Ordinary `npm test` continues to
 exclude integration tests. Running these tests against an unexpected host/project,
 or without `RUN_FIRESTORE_ORDER_LOCK=1`, fails before constructing SDK clients.
 
@@ -82,3 +84,5 @@ confirmation/current revisions, owner isolation, atomic interruption/retry,
 concurrent deletion/edit/approval, protected records and outside-project jobs,
 orphan descendants/unknown schema/size limits, and permanent recreation fencing.
 A successful test does not authorize live deletion or establish backup erasure.
+
+Fulfillment coverage uses real emulator transactions with synthetic supplier and URL responses: dispatch/reconciliation, package publication/refunds, independent status persistence, and bounded verification recovery. Recommendation coverage verifies snapshot fences, approval/export, tenant isolation and editorial-history deletion. Neither suite contacts a supplier, analytics provider or customer site.

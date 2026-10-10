@@ -25,10 +25,13 @@ function adminOptions(): AppOptions {
   };
 }
 
-export function getFirebaseAdminDb() {
-  const app = getApps().find((candidate) => candidate.name === "launch-auth-admin")
+export function getFirebaseAdminApp() {
+  return getApps().find((candidate) => candidate.name === "launch-auth-admin")
     ?? initializeApp(adminOptions(), "launch-auth-admin");
-  return getFirestore(app);
+}
+
+export function getFirebaseAdminDb() {
+  return getFirestore(getFirebaseAdminApp());
 }
 
 export function isFirebaseAdminExplicitlyConfigured() {

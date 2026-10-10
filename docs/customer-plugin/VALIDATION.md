@@ -1,4 +1,13 @@
-# Local validation — 2026-10-09
+# Customer plugin validation record
+
+Current review branch: `codex/private-customer-mcp`, pushed through
+`22d96c5f241e6b66e1dfd587720dc82f55bf98f6` before the readiness-completion pass.
+Companion, guarded retention and confirmed draft-project deletion are implemented
+and locally tested. Live OAuth, hosting, ChatGPT and supplier/payment acceptance
+remain unverified. Entries below are dated historical snapshots; later entries
+supersede earlier counts and implementation statements.
+
+## Initial local validation — 2026-10-09
 
 Base: fetched `origin/main` at `aba42c28fd221b98da8f0f211f4aa0640a84403e`.
 Branch: `codex/private-customer-mcp`.
@@ -65,7 +74,7 @@ Independent re-review after fixes: TypeScript PASS; focused MCP/route tests
 25/25 across 2 files PASS; whitespace check PASS. No remaining blocking review
 findings. Live provider/Firestore/ChatGPT integration remains unverified.
 
-## Guided companion extension — 2026-10-10 (current final patch)
+## Guided companion extension — 2026-10-10 (historical snapshot)
 
 - Full local suite: **515/515 tests passed across 33 files**.
 - TypeScript `npm run lint`: PASS.
@@ -169,3 +178,48 @@ No runtime errors or horizontal overflow. This is not live login acceptance.
 
 No merge, deployment, live purge, credential or hosting changes. Full account
 removal needs the exact policy/identity/backups decisions listed in RETENTION.md.
+
+## Readiness completion pass — 2026-10-10
+
+Implemented supplier status/evidence separation and package/refund handling;
+versioned package contracts and execution entitlements; customer-only fulfillment
+projections; support triage/guidance; saved content recommendations; session
+identity/cache and bounded-input hardening; explicit source truncation; offline
+plugin preflight and an inactive staging configuration example.
+
+Independent reviewers found and closed: partial-refund dispatch races, terminal
+URL-verification recovery, directory entitlement/replay gaps, invalid customer
+contract presentation, legacy campaign placeholders and Firebase ServerApp hash
+cache isolation. Review is scoped; it is not a full penetration test or live
+acceptance.
+
+| Final check | Result |
+| --- | --- |
+| `npm test` | 587 tests passed across 41 files |
+| `npm run lint` | TypeScript passed |
+| `npm run build` | Production Next.js build passed |
+| `node --test scripts/customer-plugin-preflight.test.mjs` | 5 passed; synthetic offline configuration only |
+| Guarded Firestore emulator launcher | 86 tests across 5 files: order locks 25, diagnostics 14, companion/retention/deletion 35, supplier lifecycle 7, recommendations 5 |
+| Browser, built local companion | Create/resume, correct-project autosave, fact approval, context export, draft import/exact-version approval, invalid file, desktop/mobile and runtime checks passed with intercepted synthetic API data |
+| Browser, current recommendation component/CSS | Review/approval, stale export refusal, reload, mobile overflow and runtime checks passed with mocked APIs |
+| Browser, built local support page | Mobile layout and disconnect guidance passed without runtime errors |
+| Independent followup | 24 supplier-dispatch, 31 directory/customer-boundary and final 9 projection tests passed in reviewer runs |
+| Diff/original checkout | Diff whitespace check passed; original checkout's dirty `next-env.d.ts` preserved |
+
+An initial unit run failed to resolve the new bounded-JSON test alias; this was
+corrected and the full suite rerun successfully. An initial browser harness used
+a missing esbuild dependency and then an ambiguous accessible-label selector;
+the fixture was rebuilt with already-installed Vite and an exact selector, and
+passed. A sandboxed emulator bind probe was denied; the authorized loopback run
+passed. No product failures remain from those attempts.
+
+Not run: live Firebase/Auth, deployed rules/indexes/scheduler, real OAuth/PKCE and
+ChatGPT connection, signed live/test Stripe end-to-end acceptance, real PRNow
+submission/refund, real listing, customer analytics/imports, paid AI generation,
+account erasure or backup restore. All supplier/crawler/HTTP responses in emulator
+acceptance are synthetic; database transactions and rules are real emulator SDK
+operations. No deployment, credentials, grants, live cleanup, contacts or purchases
+were created.
+
+See [completion matrix](../COMPLETION-MATRIX.md) and
+[owner checklist](../OWNER-ACTIONS.md). Historical counts above remain historical.

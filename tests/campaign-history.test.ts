@@ -1,5 +1,9 @@
+import { beforeEach as configureBeforeEach, afterEach as restoreAfterEach } from "vitest";
+import { configureSyntheticLiveContract } from "./helpers/package-contract";
+configureBeforeEach(configureSyntheticLiveContract);
+restoreAfterEach(() => vi.unstubAllEnvs());
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { listCampaignVersions, readCampaignVersion, restoreCampaignVersion, type RestoreCampaignInput } from "../lib/campaign-history";
 import { assertCampaignAttestation, campaignDigest } from "../lib/campaign-approval";
 import { prepareFulfillment } from "../lib/fulfillment";

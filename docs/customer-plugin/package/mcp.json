@@ -8,7 +8,18 @@
         "com.openai": {
           "auth": {
             "type": "oauth",
-            "baseScopes": ["launch:projects:read", "launch:status:read", "launch:reports:read", "launch:brief:read", "launch:drafts:write"]
+            "baseScopes": [
+              "launch:projects:read",
+              "launch:status:read",
+              "launch:reports:read",
+              "launch:brief:read",
+              "launch:drafts:write"
+            ],
+            "client": {
+              "mode": "provided",
+              "clientId": "replace-after-approved-client-registration",
+              "tokenEndpointAuthMethod": "none"
+            }
           }
         }
       }

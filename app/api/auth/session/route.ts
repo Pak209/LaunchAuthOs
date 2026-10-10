@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readBoundedJson, RequestBodyError } from "@/lib/bounded-json";
 import { z } from "zod";
 import { FIREBASE_SESSION_COOKIE, isFirebaseConfigured } from "@/lib/firebase/config";
 import { createAuthenticatedFirebaseServerApp } from "@/lib/firebase/server";
@@ -8,12 +9,13 @@ const bodySchema = z.object({ idToken: z.string().min(100).max(10_000) });
 export async function POST(request: Request) {
   if (!isFirebaseConfigured()) return NextResponse.json({ error: "Firebase is not configured." }, { status: 503 });
   const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
+  if (origin !== new URL(process.env.NEXT_PUBLIC_APP_URL ?? request.url).origin) {
     return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   }
+  if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") return NextResponse.json({ error: "JSON content type required." }, { status: 415 });
   try {
-    const { idToken } = bodySchema.parse(await request.json());
-    await createAuthenticatedFirebaseServerApp(idToken);
+    const { idToken } = bodySchema.parse(await readBoundedJson(request, 12_000));
+    await createAuthenticatedFirebaseServerApp(idToken, request);
     const response = NextResponse.json({ authenticated: true });
     response.cookies.set(FIREBASE_SESSION_COOKIE, idToken, {
       httpOnly: true,
@@ -24,7 +26,8 @@ export async function POST(request: Request) {
     });
     response.headers.set("cache-control", "private, no-store");
     return response;
-  } catch {
+  } catch (error) {
+    if (error instanceof RequestBodyError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { "cache-control": "private, no-store" } });
     return NextResponse.json({ error: "Unable to authenticate this session." }, { status: 401 });
   }
 }

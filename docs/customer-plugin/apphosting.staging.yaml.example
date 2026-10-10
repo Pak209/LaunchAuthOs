@@ -1,0 +1,27 @@
+# Review-only example. No backend is created and this filename is not deployed.
+# Owner must approve billing, region, identity/secrets and rollout before activation.
+# Schema: https://firebase.google.com/docs/app-hosting/configure
+# Console settings override YAML; verify the deployed revision after approval.
+# Instance limits reduce exposure but are NOT a total spending cap.
+runConfig:
+  minInstances: 0
+  maxInstances: 1
+  concurrency: 10
+  cpu: 1
+  memoryMiB: 512
+env:
+  - variable: CUSTOMER_MCP_ENABLED
+    value: "false"
+  - variable: PRNOW_SUBMIT_ENABLED
+    value: "false"
+  - variable: FULFILLMENT_PROVIDER
+    value: "sandbox"
+  - variable: FIRESTORE_RULES_VERIFIED
+    value: "false"
+  - variable: FIRESTORE_INDEXES_VERIFIED
+    value: "false"
+  - variable: JOB_SCHEDULER_VERIFIED
+    value: "false"
+# Deliberately omits credentials, Stripe keys, provider keys and client IDs.
+# Add approved Firebase configuration and a real HTTPS application origin only
+# during approved setup. No paid AI generation or scheduler is enabled here.

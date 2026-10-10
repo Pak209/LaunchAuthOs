@@ -2,7 +2,7 @@ import type { Firestore, QueryDocumentSnapshot } from "firebase-admin/firestore"
 import { z } from "zod";
 import { AccessError } from "../customer-mcp/auth";
 const deleteSchema = z.object({ confirmation: z.string(), expectedRevision: z.number().int().min(1), expectedCampaignVersion: z.number().int().min(0), includeDerivedContent: z.literal(true) }).strict();
-const removable = ["briefVersions", "companionRequests", "companionOperationalLogs", "profiles", "claims", "evidence"];
+const removable = ["briefVersions", "companionRequests", "companionOperationalLogs", "profiles", "claims", "evidence", "contentRecommendations", "contentRecommendationVersions"];
 const protectedCollections = ["orders", "campaignApprovals", "placements", "siteDiagnosticReports", "directorySubmissions", "jobs", "auditLogs"];
 const LIMIT = 100;
 const blocked = () => new AccessError(409, "Deletion blocked: this project has protected, linked, legacy or oversized records requiring a reviewed deletion plan. Nothing was deleted.");

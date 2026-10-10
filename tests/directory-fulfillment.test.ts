@@ -1,3 +1,8 @@
+import { resolvePackageContract } from "../lib/package-contract";
+import { beforeEach as configureBeforeEach, afterEach as restoreAfterEach } from "vitest";
+import { configureSyntheticLiveContract } from "./helpers/package-contract";
+configureBeforeEach(configureSyntheticLiveContract);
+restoreAfterEach(() => vi.unstubAllEnvs());
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { campaignDigest } from "../lib/campaign-approval";
@@ -121,7 +126,7 @@ describe("assisted directory operator workflow", () => {
 
   it("requires matching explicit payment mode for sandbox work", async () => {
     const f = await fixture();
-    f.db.seed(orderPath, { ...f.db.read(orderPath), sandbox: true, nonBillable: true, stripeLivemode: false });
+    f.db.seed(orderPath, { ...f.db.read(orderPath), sandbox: true, nonBillable: true, stripeLivemode: false, packageContract: resolvePackageContract("launch", { sandbox: true, nonBillable: true }) });
     await expect(f.record("queued")).resolves.toMatchObject({ status: "queued" });
   });
 
@@ -252,5 +257,31 @@ describe("directory operator route boundary", () => {
     expect(route).not.toContain(".submit(");
     const rules = readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
     expect(rules).toMatch(/match \/directorySubmissions\/\{[^}]+\}\s*\{[^}]*allow write: if false/s);
+  });
+});
+
+describe("frozen directory entitlements", () => {
+  it("does not replay receipts after contract integrity is lost", async () => {
+    const f = await fixture(); const request = f.input("queued");
+    await recordDirectoryOperation(f.db.asFirestore(), "operator", request);
+    const row = { ...f.db.read(orderPath) }; delete row.packageContract; f.db.seed(orderPath, row);
+    await expect(recordDirectoryOperation(f.db.asFirestore(), "operator", request)).rejects.toThrow(/reconciliation/);
+  });
+
+  it("rejects an existing task outside a valid frozen contract without mutation", async () => {
+    const f = await fixture();
+    const { resolvePackageContract } = await import("../lib/package-contract");
+    vi.stubEnv("PACKAGE_CONTRACTS_JSON", JSON.stringify([{ schemaVersion: 1, revision: "restricted", packageId: "launch", environment: "live", providerSubmission: true, directoryIds: [], priceId: "price_test_launch" }]));
+    f.db.seed(orderPath, { ...f.db.read(orderPath), packageContract: resolvePackageContract("launch", { sandbox: false, nonBillable: false }) });
+    const before = f.db.read(directoryPath);
+    await expect(f.record("queued")).rejects.toThrow(/not included/);
+    expect(f.db.read(directoryPath)).toEqual(before);
+  });
+  it.each([undefined, { digest: "invalid" }])("rejects legacy or invalid contracts", async contract => {
+    const f = await fixture();
+    const row = { ...f.db.read(orderPath) };
+    if (contract === undefined) delete row.packageContract; else row.packageContract = contract;
+    f.db.seed(orderPath, row);
+    await expect(f.record("queued")).rejects.toThrow(/reconciliation/);
   });
 });

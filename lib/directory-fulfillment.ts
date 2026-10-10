@@ -1,3 +1,4 @@
+import { assertFrozenPackageContract } from "./package-contract";
 import { createHash } from "node:crypto";
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { z } from "zod";
@@ -67,8 +68,19 @@ const transitions: Record<DirectorySubmissionStatus, readonly DirectoryOperation
   removed: ["queued", "needs_customer"],
 };
 
+export function assertDirectoryEntitlement(order: ProviderOrder, directoryId: string) {
+  try { assertFrozenPackageContract(order.packageContract, order.selectedPackageId); }
+  catch { throw new DirectoryOperationConflict("The frozen package contract requires reconciliation."); }
+  if (order.packageContract.environment !== (order.sandbox && order.nonBillable ? "sandbox" : "live")
+    || order.sandbox !== order.nonBillable
+    || !order.packageContract.directoryIds.some(id => id === directoryId)) {
+    throw new DirectoryOperationConflict("This directory is not included in the frozen package contract.");
+  }
+}
+
 function assertOrderBinding(directory: DirectorySubmission, order: ProviderOrder) {
   if (order.id !== "current" || !order.campaignDigest || !Number.isSafeInteger(order.campaignVersion)) throw new DirectoryOperationConflict("The directory task has no valid current order.");
+  assertDirectoryEntitlement(order, directory.id);
   const hasBinding = directory.orderId !== undefined || directory.campaignDigest !== undefined || directory.campaignVersion !== undefined;
   if (hasBinding) {
     if (directory.orderId !== "current" || directory.campaignDigest !== order.campaignDigest || directory.campaignVersion !== order.campaignVersion) throw new DirectoryOperationConflict("This directory task belongs to a different order or campaign.");
@@ -107,6 +119,7 @@ export async function recordDirectoryOperation(db: Firestore, actorId: string, r
     if (!projectSnapshot.exists || !orderSnapshot.exists || !directorySnapshot.exists) throw new DirectoryOperationConflict("The project, order, or existing directory task was not found.");
     const ownerId = projectSnapshot.data()?.createdBy;
     if (typeof ownerId !== "string" || input.workspaceId !== `personal_${ownerId}`) throw new DirectoryOperationConflict("The project does not match this customer workspace.");
+    assertDirectoryEntitlement(orderSnapshot.data() as ProviderOrder, input.directoryId);
     if (receipt.exists) {
       if (receipt.data()?.requestDigest !== requestDigest) throw new DirectoryOperationConflict("This request identifier was already used with different directory details or another operator.");
       return receipt.data()!.result as DirectoryOperationResult;

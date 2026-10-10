@@ -1,3 +1,4 @@
+import { resolvePackageContract, assertFrozenPackageContract, assertCurrentPackageContract } from "./package-contract";
 import { createHash, randomUUID } from "node:crypto";
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import type { CampaignDraft, DirectorySubmission, FulfillmentState, JobRun, Placement, ProviderOrder } from "./types";
@@ -276,6 +277,7 @@ export async function prepareFulfillment(
     if (!currentCampaign || currentCampaign.status !== "approved" || campaignDigest(currentCampaign) !== campaignDigest(campaign)) throw new Error("The campaign changed. Review and approve the current campaign before fulfillment.");
     assertCampaignAttestation(campaign, approvalSnapshot.data() as CampaignApprovalAttestation | undefined, uid);
     if (orderSnapshot.exists) return;
+    const packageContract = resolvePackageContract(selectedPackageId, quote);
     const profile = projectSnapshot.data()?.profile;
     const company = String(profile?.company ?? "").trim();
     const website = String(profile?.sourceUrl ?? "").trim();
@@ -290,14 +292,14 @@ export async function prepareFulfillment(
     const providerOrder: ProviderOrder = {
       id: "current", provider: quote.provider, sandbox: quote.sandbox, nonBillable: quote.nonBillable,
       providerCostCents: quote.providerCostCents, currency: quote.currency, distributionDetails, selectedPackageId,
-      submissionInput,
+      submissionInput, packageContract,
       ...(quote.providerPlan ? { providerPlan: quote.providerPlan } : {}),
       ...(quote.requiredCredits != null ? { requiredCredits: quote.requiredCredits } : {}),
       campaignVersion: campaign.version, campaignDigest: campaignDigest(campaign), checkoutAttempt: 0,
       status: "awaiting_payment", billingStatus: "awaiting_payment", createdAt: now, updatedAt: now,
     };
     transaction.create(order, { ...providerOrder, createdAtServer: FieldValue.serverTimestamp(), updatedAtServer: FieldValue.serverTimestamp() });
-    for (const template of directoryTemplates) {
+    for (const template of directoryTemplates.filter(item => packageContract.directoryIds.includes(item.id as "betalist" | "uneed" | "sourceforge"))) {
       const submission: DirectorySubmission = { ...template, status: "needs_customer", orderId: "current", campaignVersion: campaign.version, campaignDigest: campaignDigest(campaign), revision: 0, createdAt: now, updatedAt: now };
       transaction.create(directories.doc(template.id), { ...submission, createdAtServer: FieldValue.serverTimestamp(), updatedAtServer: FieldValue.serverTimestamp() });
     }
@@ -320,6 +322,9 @@ export async function bindCheckoutSession(db: Firestore, input: CheckoutBinding)
       throw new Error("The checkout order could not be matched to a project.");
     }
     const current = orderSnapshot.data() as ProviderOrder;
+    assertFrozenPackageContract(current.packageContract, current.selectedPackageId);
+    assertCurrentPackageContract(current.packageContract, current);
+    if (input.packageId !== current.selectedPackageId || (current.packageContract.environment === "live" && input.priceId !== current.packageContract.priceId)) throw new Error("Checkout does not match the frozen package contract.");
     if (current.status !== "awaiting_payment") throw new Error("The order is no longer awaiting payment.");
     if ((current.checkoutAttempt ?? 0) !== input.checkoutAttempt) throw new Error("A newer checkout attempt already exists.");
     if (current.stripeCheckoutSessionId && current.stripeCheckoutSessionId !== input.sessionId) {
@@ -500,6 +505,10 @@ async function runProviderSubmission(db: Firestore, jobRef: FirebaseFirestore.Do
     if (!orderSnapshot.exists || orderSnapshot.data()?.status !== "paid") throw new Error("The provider job has no paid order.");
     if (!campaignSnapshot.exists || !campaignSnapshot.data()?.version) throw new Error("The provider job has no campaign version.");
     const orderData = orderSnapshot.data() as ProviderOrder;
+    if (orderData.billingStatus !== "paid" || (orderData.refundedAmountCents ?? 0) !== 0) throw new Error("Supplier submission requires a paid order with no customer refunds. Reconcile this order before submission.");
+    assertFrozenPackageContract(orderData.packageContract, orderData.selectedPackageId);
+    if (orderData.packageContract.environment !== (orderData.sandbox && orderData.nonBillable ? "sandbox" : "live")) throw new Error("Frozen package contract environment does not match the order.");
+    const frozenContractDigest = orderData.packageContract.digest;
     const provider = providerForOrder(resolveProvider, orderData);
     if ((!orderData.sandbox || !orderData.nonBillable) && orderData.stripeLivemode !== true) throw new Error("Live supplier submission requires a verified live-mode payment.");
     if ((orderData.sandbox || orderData.nonBillable) && orderData.stripeLivemode !== false) throw new Error("Sandbox fulfillment requires a verified test-mode payment.");
@@ -525,7 +534,9 @@ async function runProviderSubmission(db: Firestore, jobRef: FirebaseFirestore.Do
       if (job.dispatchStartedAt || job.needsHumanReview || freshOrder?.providerSubmissionStartedAt || freshOrder?.providerSubmissionUncertain || freshOrder?.externalId) {
         throw new ProviderSubmissionNeedsReviewError("A supplier submission may already exist. Reconcile the order before retrying.");
       }
-      if (freshOrder?.status !== "paid" || freshOrder.billingStatus === "refunded") throw new Error("The order is no longer eligible for submission.");
+      if (freshOrder?.status !== "paid" || freshOrder.billingStatus !== "paid" || (freshOrder.refundedAmountCents ?? 0) !== 0) throw new Error("The order is no longer eligible for submission.");
+      assertFrozenPackageContract(freshOrder.packageContract, freshOrder.selectedPackageId);
+      if (freshOrder.packageContract.digest !== frozenContractDigest) throw new Error("The frozen package contract changed during dispatch.");
       const startedAt = new Date().toISOString();
       transaction.update(jobRef, { dispatchStartedAt: startedAt, dispatchProtocolVersion: 1, updatedAt: startedAt });
       transaction.update(order, { providerSubmissionStartedAt: startedAt, updatedAt: startedAt });
@@ -606,7 +617,27 @@ async function runPlacementVerification(db: Firestore, jobRef: FirebaseFirestore
     const order = orderSnapshot.data() as ProviderOrder | undefined;
     if (!orderSnapshot.exists || !order?.externalId) throw new Error("The verification job has no submitted provider order.");
     const provider = providerForOrder(resolveProvider, order);
-    const [providerStatus, evidence] = await Promise.all([provider.status(order.externalId), provider.evidence(order.externalId)]);
+    const providerStatus = await provider.status(order.externalId);
+    // Persist supplier state independently: a links outage must not hide rejection
+    // or credit outcomes. Re-read both lease and order to fence stale workers.
+    const statusSaved = await db.runTransaction(async (transaction) => {
+      const [currentJob, currentOrder] = await Promise.all([transaction.get(jobRef), transaction.get(orderRef)]);
+      if (!currentJob.exists || currentJob.data()?.status !== "running" || currentJob.data()?.runToken !== claimed.runToken) return false;
+      if (!currentOrder.exists || currentOrder.data()?.externalId !== order.externalId || currentOrder.data()?.provider !== order.provider) throw new Error("The provider order changed during polling.");
+      transaction.update(orderRef, {
+        status: nextProviderOrderStatus((currentOrder.data() as ProviderOrder).status, providerStatus.status),
+        providerStatusReason: providerStatus.statusReason ?? null,
+        providerPackageOutcomes: providerStatus.packageOutcomes ?? [],
+        updatedAt: new Date().toISOString(), updatedAtServer: FieldValue.serverTimestamp(),
+      });
+      return true;
+    });
+    if (!statusSaved) return { processed: false };
+    let evidenceError = false;
+    const reportEvidence = await provider.evidence(order.externalId).catch(() => { evidenceError = true; return []; });
+    const packageEvidence = (providerStatus.packageOutcomes ?? []).flatMap(outcome => outcome.state === "live" && outcome.liveUrl
+      ? [{ url: outcome.liveUrl, state: "published" as const, observedAt: new Date().toISOString() }] : []);
+    const evidence = [...packageEvidence, ...reportEvidence];
     const existingByUrl = new Map(existingSnapshot.docs.map((snapshot) => [String(snapshot.data().url), { id: snapshot.id, data: snapshot.data() as Placement }]));
     const evidenceByUrl = new Map(evidence.slice(0, 100).map((item) => [item.url, item]));
     const urls = [...new Set([...existingByUrl.keys(), ...evidenceByUrl.keys()])];
@@ -657,19 +688,17 @@ async function runPlacementVerification(db: Firestore, jobRef: FirebaseFirestore
           }, { merge: true });
         }
       }
-      transaction.update(orderRef, {
-        status: nextProviderOrderStatus(order.status, providerStatus.status),
-        providerStatusReason: providerStatus.statusReason ?? null,
-        providerPackageOutcomes: providerStatus.packageOutcomes ?? [],
-        updatedAt: now,
-        updatedAtServer: FieldValue.serverTimestamp(),
-      });
-      const terminal = providerStatus.status === "failed" || providerStatus.status === "canceled";
+      const incompleteEvidence = evidenceError || checks.some(check => Boolean(check.error));
+      const failureCount = incompleteEvidence ? Number(currentJob.data()?.failureCount ?? 0) + 1 : 0;
+      const exhausted = failureCount >= 3;
+      const terminal = !incompleteEvidence && (providerStatus.status === "failed" || providerStatus.status === "canceled");
       transaction.update(jobRef, {
-        status: terminal ? "complete" : "scheduled",
-        failureCount: 0,
-        lastError: FieldValue.delete(),
-        nextAttemptAt: terminal ? FieldValue.delete() : new Date(Date.now() + VERIFICATION_POLL_MS).toISOString(),
+        status: exhausted ? "failed" : terminal ? "complete" : "scheduled",
+        failureCount,
+        lastError: incompleteEvidence ? (exhausted
+          ? "Supplier evidence remains incomplete after three attempts. Review the saved observations and retry verification from the internal queue."
+          : "Supplier report or URL verification is unavailable; status and available observations were saved. Polling will retry.") : FieldValue.delete(),
+        nextAttemptAt: terminal || exhausted ? FieldValue.delete() : new Date(Date.now() + VERIFICATION_POLL_MS).toISOString(),
         ...clearLease(),
         updatedAt: now,
         updatedAtServer: FieldValue.serverTimestamp(),

@@ -1,3 +1,7 @@
+import { beforeEach as configureBeforeEach, afterEach as restoreAfterEach } from "vitest";
+import { configureSyntheticLiveContract } from "./helpers/package-contract";
+configureBeforeEach(configureSyntheticLiveContract);
+restoreAfterEach(() => vi.unstubAllEnvs());
 import { describe, expect, it, vi } from "vitest";
 import { prepareFulfillment, runQueuedFulfillmentJobs } from "../lib/fulfillment";
 import { campaignDigest } from "../lib/campaign-approval";

@@ -1,0 +1,12 @@
+import { afterEach, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => ({ auth: vi.fn(async () => ({ user: { uid: "alice" } })), read: vi.fn(async () => ({ recommendation: {} })), save: vi.fn(async () => ({ version: 1 })), configured: vi.fn(() => true) }));
+vi.mock("@/lib/firebase/server", () => ({ getAuthenticatedFirebaseContext: mocks.auth }));
+vi.mock("@/lib/firebase/admin", () => ({ getFirebaseAdminDb: vi.fn(), isFirebaseAdminExplicitlyConfigured: mocks.configured }));
+vi.mock("@/lib/content-recommendations", () => ({ ContentRecommendationService: class { read = mocks.read; save = mocks.save; } }));
+vi.mock("@/lib/customer-mcp/auth", async () => import("../lib/customer-mcp/auth"));
+import { GET, POST } from "../app/api/content-recommendations/[projectId]/route";
+const context = { params: Promise.resolve({ projectId: "a".repeat(24) }) }; const url = "https://launch.test/api/content-recommendations/" + "a".repeat(24);
+afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); });
+it("requires session identity and fails closed without storage", async () => { mocks.auth.mockRejectedValueOnce(new Error("Authentication required.")); expect((await GET(new Request(url), context)).status).toBe(401); mocks.configured.mockReturnValueOnce(false); expect((await GET(new Request(url), context)).status).toBe(503); expect(mocks.read).not.toHaveBeenCalled(); });
+it("delegates ownership with verified UID and no-store", async () => { const response = await GET(new Request(url + "?uid=bob"), context); expect(response.headers.get("cache-control")).toContain("no-store"); expect(mocks.read).toHaveBeenCalledWith("alice", "a".repeat(24)); });
+it("rejects cross-origin saves, oversized and invalid bodies", async () => { const req = (body: string, origin = "https://launch.test") => new Request(url, { method: "POST", headers: { origin, "content-type": "application/json" }, body }); expect((await POST(req("{}", "https://evil.test"), context)).status).toBe(403); expect((await POST(req("x".repeat(32001)), context)).status).toBe(413); expect((await POST(req("broken"), context)).status).toBe(400); expect(mocks.save).not.toHaveBeenCalled(); });

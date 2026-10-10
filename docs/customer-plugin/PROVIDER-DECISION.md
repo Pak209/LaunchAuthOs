@@ -19,7 +19,9 @@ not authorize account setup, credentials, links, deployment or ChatGPT grants.
 Proposed configuration for the approved setup step:
 
 - Register a dedicated Auth0 API with identifier exactly
-  `https://<approved-staging-host>/api/mcp`, the three `launch:*:read` scopes,
+  `https://<approved-staging-host>/api/mcp`, the four read scopes (`launch:projects:read`, `launch:status:read`,
+  `launch:reports:read`, `launch:brief:read`) and separately consented
+  `launch:drafts:write`,
   RS256 and the **RFC 9068** access-token profile (`at+jwt`). Enable RBAC so the
   `scope` claim contains only requested permissions assigned to the test user.
 - Enable **Resource Parameter Compatibility Profile** and **Include Issuer in

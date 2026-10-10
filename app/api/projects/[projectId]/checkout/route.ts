@@ -10,6 +10,8 @@ import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
 import { assertSameOrigin } from "@/lib/request-security";
 import { assertCheckoutReadiness } from "@/lib/readiness";
 
+import { assertCurrentPackageContract } from "@/lib/package-contract";
+
 const bodySchema = z.object({ packageId: z.enum(["launch", "authority", "authority_plus"]) });
 
 export const runtime = "nodejs";
@@ -38,6 +40,9 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       || campaignDigest(project.campaign) !== fulfillment.order.campaignDigest) {
       throw new Error("The campaign changed after fulfillment was prepared. Prepare a new approved order before checkout.");
     }
+    assertCurrentPackageContract(fulfillment.order.packageContract, fulfillment.order);
+    const priceId = getStripePriceId(packageId);
+    if (fulfillment.order.packageContract.environment === "live" && fulfillment.order.packageContract.priceId !== priceId) throw new Error("Package price changed after preparation. Checkout is disabled pending reconciliation.");
     const stripe = getStripeClient();
     let checkoutAttempt = fulfillment.order.checkoutAttempt ?? 0;
     if (fulfillment.order.stripeCheckoutSessionId) {
@@ -49,7 +54,6 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       checkoutAttempt = await clearExpiredCheckoutSession(adminDb, user.uid, projectId, existing.id);
     }
     const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
-    const priceId = getStripePriceId(packageId);
     const price = await stripe.prices.retrieve(priceId);
     if (price.livemode !== livemode) throw new Error("The Stripe price mode does not match the configured environment.");
     if (!price.active || price.type !== "one_time" || price.unit_amount == null) throw new Error("The selected Stripe price is not an active one-time package.");

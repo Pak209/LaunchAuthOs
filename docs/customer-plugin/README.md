@@ -2,10 +2,10 @@
 
 **Current extension:** See [Guided companion](COMPANION.md) for the implemented website brief, text intake, campaign review and three additional companion tools. The original read-only foundation below is retained for setup context; the companion document supersedes its tool/body-limit scope.
 
-Implemented locally; disabled by default. No live OAuth provider, account links,
+Implemented and pushed to the separate review branch; disabled by default. No live OAuth provider, account links,
 credentials, hosting, ChatGPT connection, marketplace installation or publication
 has been created. This is the customer product integration, separate from the
-Lex/Go collaboration workflow. Existing website authentication is unchanged.
+Lex/Go collaboration workflow. The website retains Firebase email/password authentication; request identity/cache checks and session input handling are additionally hardened.
 
 ## Scope and architecture
 
@@ -21,7 +21,7 @@ when configured. Both endpoints return 503 while disabled/unconfigured.
 | `get_campaign_status` | `launch:status:read` | Own project campaign state and intelligence or fulfillment job IDs/types/states/update times |
 | `get_placement_report` | `launch:reports:read` | Own placement IDs, outlets, URLs, recorded states, publication/verification dates and limitations |
 
-All tools are read-only, idempotent and bounded to 20 records by default, maximum
+The three foundational tools above are read-only, idempotent and bounded to 20 records by default, maximum
 50. Use the returned `nextCursor` as `after`; for status retain `jobKind` and
 `projectId` on subsequent pages. Pagination follows document IDs, not recency,
 and is not a snapshot across concurrent updates. Ownership filtering can produce
@@ -98,10 +98,10 @@ provider-managed refresh rotation/revocation.
    isolation test, membership removal, link disable and disabled-user checks.
 5. In ChatGPT Plugins choose Add custom MCP server, use the staging `/api/mcp`
    endpoint and OAuth, review the connection warning, then Create as a plugin.
-   Install privately and test all three tools in a fresh chat. This step creates
+   Install privately and test all six tools in a fresh chat. This step creates
    a connection/grant and requires separate approval.
 6. Test realistic prompts, page traversal, empty reports, revoked permissions,
-   expired access tokens and reauthorization. Confirm no generated jobs/writes
+   expired access tokens and reauthorization. Confirm read tools produce no writes or generated jobs, only the explicitly scoped draft-save tool writes,
    and no provider secrets appear in responses or logs.
 
 `package/` is a portable packaging skeleton matching the current documented
@@ -142,3 +142,10 @@ Run `npx vitest run tests/customer-mcp.test.ts`, `npm test`, `npm run lint`, and
 Firestore double; no live OAuth, Firebase, supplier, payment or generation calls.
 Live/emulator integration tests are intentionally excluded by the existing test
 configuration unless explicitly enabled. See `VALIDATION.md` for this run's results.
+
+## Staging and package gate
+
+See [PRIVATE-ACCEPTANCE.md](PRIVATE-ACCEPTANCE.md) for offline package checks,
+private installation prerequisites, approval dependencies and unexecuted live
+acceptance cases. The package now includes a scoped companion workflow skill and
+an explicit placeholder public OAuth client. Neither is a registered connection.

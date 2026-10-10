@@ -1,3 +1,7 @@
+import { beforeEach as configureBeforeEach, afterEach as restoreAfterEach } from "vitest";
+import { configureSyntheticLiveContract } from "./helpers/package-contract";
+configureBeforeEach(configureSyntheticLiveContract);
+restoreAfterEach(() => vi.unstubAllEnvs());
 import { createHash } from "node:crypto";
 import type { User } from "firebase/auth";
 import type { Firestore } from "firebase/firestore";

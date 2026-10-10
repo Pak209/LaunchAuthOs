@@ -1,3 +1,4 @@
+import { customerFulfillment, customerPrivateHeaders, customerFulfillmentError } from "@/lib/customer-fulfillment";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getFirebaseAdminDb, isFirebaseAdminExplicitlyConfigured } from "@/lib/firebase/admin";
@@ -33,11 +34,11 @@ export async function GET(_: Request, context: { params: Promise<{ projectId: st
   try {
     const { projectId } = await context.params;
     const { adminDb, user } = await contextFor(projectId);
-    return NextResponse.json({ fulfillment: await loadFulfillmentState(adminDb, user.uid, projectId) });
+    return NextResponse.json({ fulfillment: customerFulfillment(await loadFulfillmentState(adminDb, user.uid, projectId)) }, { headers: customerPrivateHeaders });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load fulfillment.";
     const status = message.includes("Authentication") ? 401 : message.includes("not configured") ? 503 : message.includes("Invalid") ? 400 : message.includes("not found") ? 404 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: customerFulfillmentError(status) }, { status, headers: customerPrivateHeaders });
   }
 }
 
@@ -52,16 +53,16 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     if (project.campaign.status !== "approved") throw new Error("Approve the campaign before preparing fulfillment.");
     providerReleaseFromCampaign(project.campaign);
     const existing = await loadFulfillmentState(adminDb, user.uid, projectId);
-    if (existing.order) return NextResponse.json({ fulfillment: existing });
+    if (existing.order) return NextResponse.json({ fulfillment: customerFulfillment(existing) }, { headers: customerPrivateHeaders });
     const provider = getDistributionProvider();
     await provider.validate(details);
     const quote = await provider.quote(packageId);
     const fulfillment = await prepareFulfillment(adminDb, user.uid, projectId, project.campaign, quote, details, packageId);
-    return NextResponse.json({ fulfillment });
+    return NextResponse.json({ fulfillment: customerFulfillment(fulfillment) }, { headers: customerPrivateHeaders });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to prepare fulfillment.";
-    if (error instanceof RateLimitError) return NextResponse.json({ error: message }, { status: 429, headers: { "retry-after": String(error.retryAfterSeconds) } });
+    if (error instanceof RateLimitError) return NextResponse.json({ error: customerFulfillmentError(429) }, { status: 429, headers: { ...customerPrivateHeaders, "retry-after": String(error.retryAfterSeconds) } });
     const status = error instanceof z.ZodError ? 400 : message.includes("Authentication") ? 401 : message.includes("not configured") || message.includes("disabled") ? 503 : message.includes("Approve") || message.includes("approve") || message.includes("Generate") ? 409 : message.includes("Invalid") || message.includes("Choose") ? 400 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: customerFulfillmentError(status) }, { status, headers: customerPrivateHeaders });
   }
 }

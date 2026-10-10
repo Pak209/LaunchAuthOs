@@ -10,7 +10,7 @@
 
 ## Proposed target, pending owner decision
 
-Use a separate staging Firebase project (proposed ID `launchauth-companion-staging`, availability unverified), Firebase App Hosting backend `companion-pilot`, owner-approved region, and its provider-generated HTTPS hostname. Exact generated URL is assigned by the provider; it cannot honestly be supplied before backend creation. Do not use the current default Hosting site's live channel. A new domain is unnecessary.
+Use a separate staging Firebase project (proposed ID `launchauth-companion-staging`, availability unverified), Firebase App Hosting backend `companion-pilot`, owner-approved region, and its provider-generated `hosted.app` HTTPS hostname. Exact generated URL is assigned by the provider; it cannot honestly be supplied before backend creation. Do not use the current default Hosting site's live channel. A new domain is unnecessary.
 
 App Hosting requires Blaze billing; included free quotas are not a spending cap or guarantee of zero charges. Need owner billing-account choice and spend authorization before provisioning. Budget alerts alone do not cap costs. Vercel Hobby is restricted to personal noncommercial use, so it is not an assumed free business alternative. Auth0 advertises a free plan (25,000 MAU); verify this tenant's required OAuth features before setup, without purchasing a plan.
 
@@ -31,7 +31,7 @@ Do not run `test:integration:firebase` against the existing project: it creates 
 
 ## Approved retention defaults, local implementation only
 
-See [RETENTION.md](RETENTION.md) for the approved source-active-plus-30-days-after-archive, current-brief/draft-until-deletion, and 30-day-history/log defaults, implemented code, protective exceptions, and live execution boundary. No live scheduler, purge or backup policy was enabled. Paid/approval/report and backup expiry remain undecided. Provider logs and complete project/account deletion remain deployment blockers for real customer data.
+See [RETENTION.md](RETENTION.md) for the approved source-active-plus-30-days-after-archive, current-brief/draft-until-deletion, and 30-day-history/log defaults, implemented code, protective exceptions, and live execution boundary. No live scheduler, purge or backup policy was enabled. Paid/approval/report and backup expiry remain undecided. Draft-project deletion is implemented with protective guards. Provider log settings, complete account deletion, and deletion of protected paid/approval/report records remain unresolved for real customer data.
 
 ## Official sources
 
@@ -41,3 +41,12 @@ See [RETENTION.md](RETENTION.md) for the approved source-active-plus-30-days-aft
 - https://vercel.com/docs/limits/fair-use-guidelines
 - https://firebase.google.com/docs/firestore/manage-data/delete-data
 - https://firebase.google.com/docs/firestore/backups
+
+## Inactive hosting example
+
+[apphosting.staging.yaml.example](apphosting.staging.yaml.example) proposes zero
+minimum / one maximum instance for an owner-reviewed private staging deployment.
+It is not an active root configuration and creates no backend. Runtime limits do
+not cap all Firebase/cloud spending; verify console overrides and the actual
+Cloud Run revision after an approved rollout. A Firebase `hosted.app` hostname is
+sufficient. Follow the [single owner checklist](../OWNER-ACTIONS.md) before setup.

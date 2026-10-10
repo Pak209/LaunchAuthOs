@@ -621,3 +621,9 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid 
   .admin-provider dl { grid-column: auto; grid-template-columns: 1fr 1fr; }
   .admin-order-grid { min-width: 920px; }
 }
+
+.content-recommendations { margin-top: 18px; padding: 20px; overflow-wrap: anywhere; line-height: 1.55; }
+.content-recommendations textarea { min-height: 70px; resize: vertical; padding: 10px; color: var(--text); background: #070e19; border: 1px solid #334158; border-radius: 7px; font: inherit; }
+.content-recommendations textarea:focus-visible { outline: 2px solid var(--violet-bright); outline-offset: 2px; }
+.content-recommendations button { margin: 6px 8px 6px 0; white-space: normal; }
+.content-recommendations button:disabled { opacity: .45; }

@@ -1,3 +1,7 @@
+import { beforeEach as configureBeforeEach, afterEach as restoreAfterEach } from "vitest";
+import { configureSyntheticLiveContract } from "./helpers/package-contract";
+configureBeforeEach(configureSyntheticLiveContract);
+restoreAfterEach(() => vi.unstubAllEnvs());
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assertJobCanRetry, markPaymentIntentRefunded, prepareFulfillment, runQueuedFulfillmentJobs } from "../lib/fulfillment";
 import { campaignDigest } from "../lib/campaign-approval";
@@ -68,6 +72,57 @@ describe("durable supplier dispatch", () => {
     expect(db.read(jobPath).status).toBe("complete");
     await run();
     expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists rejection and supplier credits even when evidence fails, without customer refund", async () => {
+    const { db, provider, run } = await fixture();
+    await run();
+    vi.mocked(provider.status).mockResolvedValue({ externalId: "release_123", status: "failed", packageOutcomes: [{ package: "standard", state: "rejected", creditsRefunded: 10 }] });
+    vi.mocked(provider.evidence).mockRejectedValue(new Error("links unavailable"));
+    await run();
+    expect(db.read(orderPath)).toMatchObject({ status: "failed", billingStatus: "paid", providerPackageOutcomes: [{ package: "standard", state: "rejected", creditsRefunded: 10 }] });
+    expect(db.read(orderPath).refundedAmountCents).toBeUndefined();
+    expect(db.read(`${project}/jobs/placement_verification_current`).status).toBe("scheduled");
+    vi.mocked(provider.evidence).mockResolvedValue([]);
+    vi.advanceTimersByTime(24 * 60 * 60_000);
+    await run();
+    expect(db.read(`${project}/jobs/placement_verification_current`).status).toBe("complete");
+  });
+
+  it("does not overwrite an independently canceled order during polling", async () => {
+    const { db, provider, run } = await fixture(); await run();
+    vi.mocked(provider.status).mockImplementation(async externalId => {
+      db.seed(orderPath, { ...db.read(orderPath), status: "canceled" });
+      return { externalId, status: "published" };
+    });
+    await run();
+    expect(db.read(orderPath).status).toBe("canceled");
+  });
+
+  it("blocks legacy orders without frozen entitlements before supplier dispatch", async () => {
+    const { db, submit, run } = await fixture();
+    const order = db.read(orderPath); delete order.packageContract; db.seed(orderPath, order);
+    await run(); expect(submit).not.toHaveBeenCalled();
+    expect(db.read(jobPath).lastError).toMatch(/Frozen package contract/);
+    expect(db.read(jobPath).dispatchStartedAt).toBeUndefined();
+  });
+
+  it("uses frozen paid entitlements even when the current catalog is disabled", async () => {
+    const { db, submit, run } = await fixture();
+    const digest = db.read(orderPath).packageContract.digest;
+    vi.stubEnv("PACKAGE_CONTRACTS_APPROVED", "false"); vi.stubEnv("PACKAGE_CONTRACTS_JSON", "[]");
+    await run(); expect(submit).toHaveBeenCalledTimes(1);
+    expect(db.read(orderPath).packageContract.digest).toBe(digest);
+  });
+
+  it("creates only the reviewed package's entitled directory tasks", async () => {
+    const config = JSON.parse(process.env.PACKAGE_CONTRACTS_JSON!); config[0].directoryIds = ["uneed"];
+    vi.stubEnv("PACKAGE_CONTRACTS_JSON", JSON.stringify(config));
+    const { db } = await fixture();
+    expect(db.rows.has(`${project}/directorySubmissions/uneed`)).toBe(true);
+    expect(db.rows.has(`${project}/directorySubmissions/betalist`)).toBe(false);
+    expect(db.rows.has(`${project}/directorySubmissions/sourceforge`)).toBe(false);
+    expect(db.read(orderPath).packageContract.directoryIds).toEqual(["uneed"]);
   });
 
   it("allows only one of two concurrent workers to submit", async () => {
@@ -157,6 +212,14 @@ describe("durable supplier dispatch", () => {
     });
     await run();
     expect(submit).not.toHaveBeenCalled();
+    expect(db.read(jobPath).dispatchStartedAt).toBeUndefined();
+  });
+
+  it.each([false, true])("blocks partial customer refunds before dispatch (concurrent=%s)", async concurrent => {
+    const { db, provider, submit, run } = await fixture();
+    const refund = () => db.seed(orderPath, { ...db.read(orderPath), billingStatus: "partially_refunded", refundedAmountCents: 10 });
+    if (concurrent) vi.mocked(provider.assertCanSubmit).mockImplementation(refund); else refund();
+    await run(); expect(submit).not.toHaveBeenCalled();
     expect(db.read(jobPath).dispatchStartedAt).toBeUndefined();
   });
 

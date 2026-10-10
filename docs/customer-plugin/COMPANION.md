@@ -1,7 +1,6 @@
 # Guided launch companion — local slice, 2026-10-10
 
-This extends the initial read-only prototype. Nothing has been committed,
-deployed, connected to ChatGPT or provisioned in live infrastructure. The code is prepared for the approved separate review branch.
+This extends the initial read-only prototype. The companion, retention and guarded draft-project deletion are committed and pushed to the separate review branch `codex/private-customer-mcp` (baseline `22d96c5`). No deployment, live ChatGPT connection or infrastructure provisioning has occurred.
 MCP remains disabled unless `CUSTOMER_MCP_ENABLED=true` is explicitly configured.
 
 ## Working slice
@@ -99,7 +98,7 @@ website `GET/POST /api/companion/[projectId]`. Website POST requires an exact tr
 Origin and JSON; bodies are capped at 160 KB. MCP bodies are capped at 160 KB.
 No payment/pricing/checkout links, upsells, admin or supplier tools are exposed by
 MCP. The companion has standalone drafting/management value; website commercial
-flows remain separate and unchanged.
+flows remain separate from MCP. The readiness pass additionally hardens website package contracts and customer fulfillment projections.
 
 ## Live work still blocked
 

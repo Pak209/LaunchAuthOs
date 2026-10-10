@@ -2,6 +2,8 @@
 
 This document is the release gate for charging controlled beta customers. The application must remain unavailable for live payment until every required item below is complete.
 
+Current local delivery and owner decisions: [completion matrix](docs/COMPLETION-MATRIX.md) and [owner actions](docs/OWNER-ACTIONS.md). Local verification does not satisfy live release gates.
+
 ## Implemented in the application
 
 - Firebase Authentication, tenant-isolated Firestore workspaces, multi-project resume, and autosave.
@@ -37,7 +39,7 @@ These cannot be completed truthfully in code alone:
 4. Set final package prices after supplier costs, Stripe fees, expected refunds, taxes, and human fulfillment time are known.
 5. Create Stripe products/prices, configure the production webhook, and complete test-mode then live-mode checkout/refund drills.
 6. Have counsel approve the privacy policy, terms, refund policy, supplier disclosure, and marketing claims.
-7. Select production hosting, connect the final domain and email domain, configure secrets, deploy Firestore rules, enable backups, and connect error monitoring.
+7. Approve hosting/billing and region, configure secrets, deploy Firestore rules, enable backups, and connect error monitoring. Firebase App Hosting provides a `hosted.app` hostname; a custom domain is optional. Email delivery still requires an approved sender setup.
 8. Assign a fulfillment/support owner and identify the first 3–5 controlled beta customers.
 
 ## Remaining engineering and validation gates
@@ -45,22 +47,22 @@ These cannot be completed truthfully in code alone:
 - Validate the implemented administrator reconciliation workflow against the supplier pilot. Follow `OPERATIONS.md`; do not clear database dispatch markers manually.
 - Deploy `firestore.indexes.json`, including `siteDiagnosticJobs.status`, verify collection-group queries, and configure scheduled POST calls to `/api/internal/jobs/run`. The endpoint runs fulfillment, intelligence and diagnostics workers independently and awaits all three groups; a partial failure returns 500 without abandoning the other workers.
 - Connect actual error-reporting instrumentation and analytics; a configured DSN alone is not proof of operational monitoring.
-- Run transactional dispatch/recovery tests against Firestore Emulator or the deployment database and run the full signed-webhook/provider lifecycle. Those fulfillment/recovery regression tests still use a storage-only Firestore double and mocked supplier responses. The separate order-lock suite uses the real local emulator but does not cover the supplier/payment lifecycle or establish live deployment.
+- Transactional dispatch, partial package publication/refund, status/report failure separation and verification recovery now have a deterministic real Firestore Emulator suite with mocked supplier/HTTP responses. Complete the signed Stripe webhook and authorized live supplier lifecycle separately; local tests do not establish provider or deployment behavior.
 - Run the complete directory workflow with an authorized operator and a real listing, and validate history restore plus approval/checkout concurrency against Firestore. Browser fixtures verify rendering/interaction only, not real directory publication or backend deployment.
 - Extend customer notifications beyond the implemented payment email, or establish an explicit manual support process for failures, publication and refund updates during the controlled beta.
 - Deploy and validate the updated order-lock rules against the target Firebase project before restoring `FIRESTORE_RULES_VERIFIED=true`. The old deployed-rule verification does not cover this revision. Exercise ordinary edits versus order preparation/approval with authenticated users; local storage-double and HTTP-handler tests alone do not establish deployment behavior.
 - Validate the implemented cross-session conflict/local-draft/reload workflow against real authenticated concurrent sessions; isolated UI fixtures and pure state tests do not establish live Firebase behavior.
-- Synchronize the loaded campaign approval badge after evidence-only saves: the server invalidates approval, but the previously loaded campaign object's displayed status can remain stale until reload. Server checkout/fulfillment gates remain authoritative; do not use a browser badge as approval evidence.
+- The loaded campaign approval state now clears after evidence-only saves through the shared evidence-save state helper and regression tests. Real authenticated cross-session acceptance remains required.
 - The Authority Graph network visualization and independent backlink/search/AI measurements remain unimplemented. The current footprint panel is a labeled ledger summary. The four customer SEO/engagement deliverables below are now committed remaining scope; imported or attributed observations must not be marketed as independently verified whole-market measurements.
 - Legacy paid orders lacking frozen submission data or a verified Stripe mode fail closed and require reconciliation; do not fill these fields from assumptions.
-- The earlier broad security review could not be finalized because its temporary artifact directory is missing. Targeted regression tests are not a replacement for completion of that review.
+- A new independent scoped security/concurrency review covered identity isolation, support projections, recommendation concurrency, retention/deletion, supplier refund races and package enforcement. It found and fixed Firebase ServerApp token-cache collision handling, refund dispatch fencing and verification recovery. This does not reconstruct the missing earlier review artifact or constitute a complete penetration test.
 
 ## Remaining customer SEO and engagement deliverables
 
-These remain incomplete. SEO-01 has an implemented bounded diagnostic slice; it still needs deployment and acceptance, and the other three workflows remain pending. Track them alongside the existing paid-MVP work; do not mark the expanded project scope complete or advertise them as available without the acceptance evidence defined in [PRODUCT_SPEC.md](PRODUCT_SPEC.md#committed-remaining-scope-customer-seo-and-ai-search-engagement).
+These are not live accepted. SEO-01 diagnostics and SEO-02 recommendations are implemented locally; deployment and authorized acceptance remain. SEO-03 and SEO-04 await the specific source/property and event decisions in the owner checklist. Track them alongside the existing paid-MVP work; do not mark the expanded project scope complete or advertise them as available without the acceptance evidence defined in [PRODUCT_SPEC.md](PRODUCT_SPEC.md#committed-remaining-scope-customer-seo-and-ai-search-engagement).
 
 - [ ] **SEO-01 — Customer-site crawlability and indexing diagnostics:** bounded evidence-backed checks, jobs and review UI implemented locally; diagnostic persistence, contention and recovery now have real local Firestore Emulator coverage. Deployed indexes, production scheduler/recovery, owner-authorized sites and snapshot retention/deletion still require acceptance. Add dated engine-specific index evidence through an authorized source; current reports correctly retain `not_checked`. Crawler transport is injected in tests; local database verification is not live acceptance.
-- [ ] **SEO-02 — Evidence-backed content recommendations:** approved-claim/source references, evidence freshness/gaps, customer review and export; no unauthorized publishing or mutation of ordered campaigns.
+- [ ] **SEO-02 — Evidence-backed content recommendations:** implemented deterministic approved-fact recommendations, snapshot/version fences, saved review/approval and fresh-state export. Real emulator coverage verifies tenant boundaries and concurrent edits. Freshness/destination verification remain explicit unknowns; no publishing or ordered-campaign mutation. See [scope and acceptance](docs/SEO-REMAINING.md).
 - [ ] **SEO-03 — Google/Bing visibility report imports:** owner-authorized source reconciliation, tenant isolation, repeat/overlap handling, and preserved missing/ambiguous values; verify actual provider schemas before integration.
 - [ ] **SEO-04 — AI referral and conversion tracking—separate from citations:** authorized collection, verified event definitions, deduplication, bot/test exclusion, consent/retention controls, and separate referral/conversion denominators.
 

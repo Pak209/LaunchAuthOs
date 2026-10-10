@@ -19,7 +19,7 @@ export type ProviderSubmissionInput = DistributionDetails & {
   website: string;
   providerPlan?: string;
 };
-export type ProviderPackageOutcome = { package: string; state: string; creditsRefunded?: number; reason?: string };
+export type ProviderPackageOutcome = { package: string; state: string; creditsRefunded?: number; reason?: string; liveUrl?: string };
 export type ProviderSubmission = {
   externalId: string;
   status: "submitted" | "processing" | "published" | "failed" | "canceled";
@@ -103,13 +103,22 @@ function mapPrNowStatus(value: unknown): ProviderSubmission["status"] {
   switch (text(value).toLowerCase()) {
     case "draft":
     case "pending": return "submitted";
-    case "in_progress": return "processing";
-    case "published":
-    case "distributed": return "published";
+    case "in_progress":
+    // Sent to outlets is not evidence of a live publication.
+    case "distributed": return "processing";
+    case "published": return "published";
     case "rejected": return "failed";
     case "refunded": return "canceled";
     default: throw new Error("PRNow returned an unknown release status.");
   }
+}
+
+function publicEvidenceUrl(value: unknown) {
+  try {
+    const url = new URL(text(value));
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return undefined;
+    return url.toString();
+  } catch { return undefined; }
 }
 
 function packageOutcomes(value: unknown): ProviderPackageOutcome[] {
@@ -118,11 +127,13 @@ function packageOutcomes(value: unknown): ProviderPackageOutcome[] {
     const packageName = text(item.package || item.name || item.plan);
     const state = text(item.state || item.status);
     if (!packageName || !state) return [];
-    const creditsRefunded = Number(item.creditsRefunded);
+    const creditsRefunded = item.creditsRefunded;
+    const liveUrl = state === "live" ? publicEvidenceUrl(item.liveUrl) : undefined;
     return [{
       package: packageName.slice(0, 160),
+      ...(liveUrl ? { liveUrl } : {}),
       state: state.slice(0, 80),
-      ...(Number.isSafeInteger(creditsRefunded) && creditsRefunded >= 0 ? { creditsRefunded } : {}),
+      ...(typeof creditsRefunded === "number" && Number.isSafeInteger(creditsRefunded) && creditsRefunded >= 0 ? { creditsRefunded } : {}),
       ...(text(item.reason) ? { reason: text(item.reason).slice(0, 500) } : {}),
     }];
   });

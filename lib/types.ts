@@ -103,6 +103,7 @@ export type ProviderOrder = {
   nonBillable: boolean;
   providerCostCents: number;
   currency: string;
+  packageContract?: import("./package-contract").PackageContract;
   selectedPackageId?: "launch" | "authority" | "authority_plus";
   distributionDetails?: { country: string; city: string; categories: string[]; contactName: string; contactEmail: string };
   providerPlan?: string;
@@ -129,7 +130,7 @@ export type ProviderOrder = {
   refundedAmountCents?: number;
   refundedAt?: string;
   providerStatusReason?: string;
-  providerPackageOutcomes?: Array<{ package: string; state: string; creditsRefunded?: number; reason?: string }>;
+  providerPackageOutcomes?: Array<{ package: string; state: string; creditsRefunded?: number; reason?: string; liveUrl?: string }>;
   providerSubmissionUncertain?: boolean;
   packageId?: "launch" | "authority" | "authority_plus";
   createdAt: string;
