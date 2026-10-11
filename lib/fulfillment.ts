@@ -1,3 +1,5 @@
+import type Stripe from "stripe";
+import { assertTerminalCheckout, checkoutBindingSnapshot, CheckoutRecoveryConflict } from "./checkout-recovery";
 import { isSafeUid } from "./identity";
 import { resolvePackageContract, assertFrozenPackageContract, assertCurrentPackageContract } from "./package-contract";
 import { createHash, randomUUID } from "node:crypto";
@@ -324,6 +326,7 @@ export async function bindCheckoutSession(db: Firestore, input: CheckoutBinding)
       throw new Error("The checkout order could not be matched to a project.");
     }
     const current = orderSnapshot.data() as ProviderOrder;
+    if (current.paymentReviewHold) throw new CheckoutRecoveryConflict("Payment requires support reconciliation before another checkout.");
     assertFrozenPackageContract(current.packageContract, current.selectedPackageId);
     assertCurrentPackageContract(current.packageContract, current);
     if (input.packageId !== current.selectedPackageId || (current.packageContract.environment === "live" && input.priceId !== current.packageContract.priceId)) throw new Error("Checkout does not match the frozen package contract.");
@@ -345,20 +348,40 @@ export async function bindCheckoutSession(db: Firestore, input: CheckoutBinding)
   });
 }
 
-export async function clearExpiredCheckoutSession(db: Firestore, uid: string, projectId: string, sessionId: string) {
+export async function assertCheckoutStillCurrent(db: Firestore, uid: string, projectId: string, sessionId: string, attempt: number) {
   const { project, order } = paths(db, uid, projectId);
+  await db.runTransaction(async transaction => {
+    const [owner, snapshot] = await Promise.all([transaction.get(project), transaction.get(order)]);
+    const current = snapshot.data() as ProviderOrder | undefined;
+    if (owner.data()?.createdBy !== uid || !current || current.paymentReviewHold || current.status !== "awaiting_payment"
+      || current.stripeCheckoutSessionId !== sessionId || (current.checkoutAttempt ?? 0) !== attempt) {
+      throw new CheckoutRecoveryConflict("Checkout state changed or requires support reconciliation. Refresh before retrying.");
+    }
+  });
+}
+
+export async function clearExpiredCheckoutSession(db: Firestore, uid: string, projectId: string, sessionId: string, verifiedSession: Stripe.Checkout.Session) {
+  const { project, order, jobs } = paths(db, uid, projectId);
   return db.runTransaction(async (transaction) => {
-    const [projectSnapshot, orderSnapshot] = await Promise.all([transaction.get(project), transaction.get(order)]);
+    const [projectSnapshot, orderSnapshot, jobSnapshot] = await Promise.all([transaction.get(project), transaction.get(order), transaction.get(jobs.doc("provider_submission_current"))]);
     if (!projectSnapshot.exists || projectSnapshot.data()?.createdBy !== uid || !orderSnapshot.exists) {
       throw new Error("The checkout order could not be matched to a project.");
     }
     const current = orderSnapshot.data() as ProviderOrder;
     if (current.status !== "awaiting_payment" || current.stripeCheckoutSessionId !== sessionId) {
-      throw new Error("The checkout session is no longer current.");
+      throw new CheckoutRecoveryConflict("The checkout session is no longer current. Refresh before retrying.");
     }
+    if (current.paymentReviewHold || jobSnapshot.data()?.status !== "blocked" || jobSnapshot.data()?.dispatchStartedAt) throw new CheckoutRecoveryConflict("Payment requires support reconciliation before retry.");
+    const closure = assertTerminalCheckout(verifiedSession, current, uid, projectId);
+    if (closure.reason === "canceled_payment" && (!current.paymentFailureObserved || current.paymentFailureIntentId !== closure.paymentIntentId)) throw new CheckoutRecoveryConflict("No verified failed-payment observation exists. Contact support.");
+    transaction.create(project.collection("checkoutAttempts").doc(String(current.checkoutAttempt ?? 0)), {
+      ...checkoutBindingSnapshot(current), ...closure, retiredAt: new Date().toISOString(),
+    });
     const checkoutAttempt = (current.checkoutAttempt ?? 0) + 1;
     transaction.update(order, {
       checkoutAttempt,
+      paymentFailureObserved: FieldValue.delete(),
+      paymentFailureIntentId: FieldValue.delete(),
       stripeCheckoutSessionId: FieldValue.delete(),
       expectedPackageId: FieldValue.delete(),
       expectedPriceId: FieldValue.delete(),
@@ -405,12 +428,25 @@ export async function markCheckoutPaid(
   const jobRef = jobs.doc("provider_submission_current");
   const now = new Date().toISOString();
   await db.runTransaction(async (transaction) => {
-    const [eventSnapshot, projectSnapshot, orderSnapshot, jobSnapshot] = await Promise.all([
-      transaction.get(eventRef), transaction.get(project), transaction.get(order), transaction.get(jobRef),
+    const [eventSnapshot, projectSnapshot, orderSnapshot, jobSnapshot, retiredSnapshot] = await Promise.all([
+      transaction.get(eventRef), transaction.get(project), transaction.get(order), transaction.get(jobRef), transaction.get(project.collection("checkoutAttempts").doc(String(input.checkoutAttempt))),
     ]);
     if (eventSnapshot.exists) return;
     if (!projectSnapshot.exists || projectSnapshot.data()?.createdBy !== input.uid || !orderSnapshot.exists) throw new Error("The paid order could not be matched to a project.");
     const savedOrder = orderSnapshot.data() as ProviderOrder;
+    if (retiredSnapshot.exists) {
+      const retired = retiredSnapshot.data()!;
+      assertPaidCheckoutMatchesOrder(retired as ProviderOrder, input);
+      if (retired.paymentIntentId && retired.paymentIntentId !== input.paymentIntentId) throw new Error("Retired checkout payment does not match.");
+      transaction.create(eventRef, { type: "checkout.session.completed", needsHumanReview: true, processedAt: FieldValue.serverTimestamp() });
+      transaction.update(order, { paymentReviewHold: true, updatedAt: now });
+      if (jobSnapshot.exists) {
+        const dispatched = !!jobSnapshot.data()?.dispatchStartedAt;
+        transaction.update(jobRef, { ...(dispatched || jobSnapshot.data()?.status === "complete" ? {} : { status: "blocked" }), blockedReason: "payment_reconciliation_required", needsHumanReview: true, updatedAt: now });
+      }
+      return;
+    }
+    if (savedOrder.paymentReviewHold) throw new CheckoutRecoveryConflict("Payment requires support reconciliation.");
     if (savedOrder.stripePaymentIntentId && ["paid", "partially_refunded", "refunded"].includes(savedOrder.billingStatus ?? "")) {
       // A distinct signed event can describe the same settled Checkout Session.
       // Validate both its original binding and recorded settlement, then only record
@@ -428,8 +464,10 @@ export async function markCheckoutPaid(
       return;
     }
     assertPaidCheckoutMatchesOrder(savedOrder, input);
+    if (savedOrder.paymentFailureIntentId && savedOrder.paymentFailureIntentId !== input.paymentIntentId) throw new Error("The successful payment intent does not match the recorded checkout failure.");
     transaction.create(eventRef, { type: "checkout.session.completed", processedAt: FieldValue.serverTimestamp() });
     transaction.update(order, {
+      paymentFailureObserved: FieldValue.delete(), paymentFailureIntentId: FieldValue.delete(),
       status: "paid", billingStatus: "paid", stripeCheckoutSessionId: input.sessionId, stripePaymentIntentId: input.paymentIntentId,
       stripeLivemode: input.livemode,
       packageId: input.packageId, amountSubtotal: input.amountSubtotal, amountTotal: input.amountTotal,
@@ -446,6 +484,23 @@ export async function markCheckoutPaid(
       });
     }
     transaction.update(project, { lifecycleStatus: "fulfillment", campaignStatus: "fulfillment", updatedAtIso: now, updatedAt: FieldValue.serverTimestamp() });
+  });
+}
+
+export async function markCheckoutFailed(db: Firestore, input: PaidCheckout) {
+  if (!isSafeUid(input.uid) || !/^[a-f0-9]{24}$/.test(input.projectId)) throw new Error("The checkout metadata is invalid.");
+  const { project, order } = paths(db, input.uid, input.projectId);
+  await db.runTransaction(async transaction => {
+    const receipt = db.doc(`stripeEvents/${input.eventId}`);
+    const [seen, owner, snapshot, retired] = await Promise.all([transaction.get(receipt), transaction.get(project), transaction.get(order), transaction.get(project.collection("checkoutAttempts").doc(String(input.checkoutAttempt)))]);
+    if (seen.exists) return;
+    if (!owner.exists || owner.data()?.createdBy !== input.uid || !snapshot.exists) throw new Error("Failed checkout could not be matched.");
+    const current = snapshot.data() as ProviderOrder;
+    assertPaidCheckoutMatchesOrder({ ...(retired.exists ? retired.data() : current), status: "awaiting_payment" } as ProviderOrder, input);
+    if (retired.exists && retired.data()?.paymentIntentId && retired.data()?.paymentIntentId !== input.paymentIntentId) throw new Error("Failed payment intent does not match the retained attempt.");
+    if (((current.stripePaymentIntentId && current.stripePaymentIntentId !== input.paymentIntentId) || (current.paymentFailureIntentId && current.paymentFailureIntentId !== input.paymentIntentId)) && !retired.exists) throw new Error("Failed payment intent does not match the saved payment.");
+    transaction.create(receipt, { type: "checkout.session.async_payment_failed", processedAt: FieldValue.serverTimestamp() });
+    if (!retired.exists && current.status === "awaiting_payment" && !current.stripePaymentIntentId) transaction.update(order, { paymentFailureObserved: true, paymentFailureIntentId: input.paymentIntentId });
   });
 }
 
@@ -524,7 +579,7 @@ async function runProviderSubmission(db: Firestore, jobRef: FirebaseFirestore.Do
     if (!orderSnapshot.exists || orderSnapshot.data()?.status !== "paid") throw new Error("The provider job has no paid order.");
     if (!campaignSnapshot.exists || !campaignSnapshot.data()?.version) throw new Error("The provider job has no campaign version.");
     const orderData = orderSnapshot.data() as ProviderOrder;
-    if (orderData.billingStatus !== "paid" || (orderData.refundedAmountCents ?? 0) !== 0) throw new Error("Supplier submission requires a paid order with no customer refunds. Reconcile this order before submission.");
+    if (orderData.paymentReviewHold || orderData.billingStatus !== "paid" || (orderData.refundedAmountCents ?? 0) !== 0) throw new Error("Supplier submission requires a paid order with no customer refunds. Reconcile this order before submission.");
     assertFrozenPackageContract(orderData.packageContract, orderData.selectedPackageId);
     if (orderData.packageContract.environment !== (orderData.sandbox && orderData.nonBillable ? "sandbox" : "live")) throw new Error("Frozen package contract environment does not match the order.");
     const frozenContractDigest = orderData.packageContract.digest;
@@ -553,7 +608,7 @@ async function runProviderSubmission(db: Firestore, jobRef: FirebaseFirestore.Do
       if (job.dispatchStartedAt || job.needsHumanReview || freshOrder?.providerSubmissionStartedAt || freshOrder?.providerSubmissionUncertain || freshOrder?.externalId) {
         throw new ProviderSubmissionNeedsReviewError("A supplier submission may already exist. Reconcile the order before retrying.");
       }
-      if (freshOrder?.status !== "paid" || freshOrder.billingStatus !== "paid" || (freshOrder.refundedAmountCents ?? 0) !== 0) throw new Error("The order is no longer eligible for submission.");
+      if (freshOrder?.paymentReviewHold || freshOrder?.status !== "paid" || freshOrder.billingStatus !== "paid" || (freshOrder.refundedAmountCents ?? 0) !== 0) throw new Error("The order is no longer eligible for submission.");
       assertFrozenPackageContract(freshOrder.packageContract, freshOrder.selectedPackageId);
       if (freshOrder.packageContract.digest !== frozenContractDigest) throw new Error("The frozen package contract changed during dispatch.");
       const startedAt = new Date().toISOString();

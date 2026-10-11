@@ -276,3 +276,14 @@ describe("durable supplier dispatch", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 });
+
+it("rechecks a payment hold appearing between initial validation and dispatch transaction", async () => {
+  const { db, provider, submit, run } = await fixture();
+  vi.mocked(provider.assertCanSubmit).mockImplementation(() => {
+    db.seed(orderPath, { ...db.read(orderPath), paymentReviewHold: true });
+  });
+  await run();
+  expect(submit).not.toHaveBeenCalled();
+  expect(db.read(orderPath).providerSubmissionStartedAt).toBeUndefined();
+  expect(db.read(jobPath).dispatchStartedAt).toBeUndefined();
+});

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { getFirebaseAdminDb } from "@/lib/firebase/admin";
-import { markCheckoutPaid, markPaymentIntentRefunded } from "@/lib/fulfillment";
+import { markCheckoutPaid, markCheckoutFailed, markPaymentIntentRefunded } from "@/lib/fulfillment";
 import { getStripeClient, getStripeWebhookSecret, isStripeLiveMode } from "@/lib/stripe";
 
 export const runtime = "nodejs";
@@ -31,14 +31,14 @@ export async function POST(request: Request) {
       // Completion can precede settlement. Neither pending completion nor a failure
       // authorizes fulfillment or reverses an already-confirmed payment.
       if (session.mode !== "payment") throw new Error("Unexpected checkout session mode.");
-      if (event.type === "checkout.session.async_payment_failed"
-        || (event.type === "checkout.session.completed" && session.payment_status === "unpaid")) {
+      if (event.type === "checkout.session.completed" && session.payment_status === "unpaid") {
         return NextResponse.json({ received: true });
       }
-      if (session.payment_status !== "paid") throw new Error("The checkout payment has not succeeded.");
+      if (event.type === "checkout.session.async_payment_failed" && session.payment_status !== "unpaid") throw new Error("The failure event does not describe an unpaid checkout.");
+      if (event.type !== "checkout.session.async_payment_failed" && session.payment_status !== "paid") throw new Error("The checkout payment has not succeeded.");
       const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
       if (!paymentIntentId) throw new Error("The completed checkout has no payment intent.");
-      await markCheckoutPaid(adminDb, {
+      await (event.type === "checkout.session.async_payment_failed" ? markCheckoutFailed : markCheckoutPaid)(adminDb, {
         uid: session.metadata.uid, projectId: session.metadata.projectId, packageId,
         priceId: session.metadata.priceId, checkoutAttempt,
         eventId: event.id, sessionId: session.id, paymentIntentId,

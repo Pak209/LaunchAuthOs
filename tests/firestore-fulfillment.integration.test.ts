@@ -1,8 +1,9 @@
+import type Stripe from "stripe";
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { initializeApp, deleteApp, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
-import { prepareFulfillment, runQueuedFulfillmentJobs, markPaymentIntentRefunded, markCheckoutPaid } from "../lib/fulfillment";
+import { prepareFulfillment, runQueuedFulfillmentJobs, markPaymentIntentRefunded, markCheckoutPaid, clearExpiredCheckoutSession, bindCheckoutSession } from "../lib/fulfillment";
 import { verifyPublicPlacementUrl } from "../lib/placement-verification";
 import { campaignDigest } from "../lib/campaign-approval";
 import { SandboxDistributionProvider, type ProviderSubmission } from "../lib/provider";
@@ -148,4 +149,36 @@ it("preserves full refund and terminal job when a new paid Checkout event arrive
   expect((await order().get()).data()).toEqual(beforeOrder);
   expect((await submissionJob().get()).data()).toEqual(beforeJob);
   expect((await project().collection("jobs").get()).docs.filter(item => item.data().type === "customer_email")).toHaveLength(1);
+});
+
+
+function expiredCheckoutFor(payment: Awaited<ReturnType<typeof pendingCheckoutFixture>>) {
+  return { id: payment.sessionId, status: "expired", mode: "payment", payment_status: "unpaid", livemode: false,
+    metadata: { uid, projectId: id, packageId: "launch", priceId: payment.priceId, checkoutAttempt: "0" },
+    amount_subtotal: 100, amount_total: 100, currency: "usd", payment_intent: null } as unknown as Stripe.Checkout.Session;
+}
+it("serializes competing terminal checkout retries to one retained attempt", async () => {
+  const payment = await pendingCheckoutFixture(), expired = expiredCheckoutFor(payment);
+  const outcomes = await Promise.allSettled([clearExpiredCheckoutSession(db, uid, id, payment.sessionId, expired), clearExpiredCheckoutSession(db, uid, id, payment.sessionId, expired)]);
+  expect(outcomes.filter(item => item.status === "fulfilled")).toHaveLength(1);
+  expect((await order().get()).data()?.checkoutAttempt).toBe(1);
+  expect((await project().collection("checkoutAttempts").get()).size).toBe(1);
+});
+it("fences settlement racing retry and blocks binding after contradictory old success", async () => {
+  const payment = await pendingCheckoutFixture(), expired = expiredCheckoutFor(payment);
+  await Promise.allSettled([clearExpiredCheckoutSession(db, uid, id, payment.sessionId, expired), markCheckoutPaid(db, { ...payment, eventId: `${id}_checkout_one` })]);
+  const current = (await order().get()).data()!;
+  if (current.paymentReviewHold) {
+    expect(current.checkoutAttempt).toBe(1);
+    expect((await submissionJob().get()).data()?.status).toBe("blocked");
+    await expect(bindCheckoutSession(db, { ...payment, sessionId: `cs_new_${id}`, checkoutAttempt: 1 })).rejects.toThrow(/reconciliation/);
+  } else {
+    expect(current.status).toBe("paid"); expect(current.checkoutAttempt).toBe(0);
+    expect((await project().collection("checkoutAttempts").get()).size).toBe(0);
+  }
+});
+it("prevents dispatch when a payment reconciliation hold precedes worker claim", async () => {
+  await order().update({ paymentReviewHold: true });
+  await run(); expect(provider.submit).not.toHaveBeenCalled();
+  expect((await order().get()).data()?.providerSubmissionStartedAt).toBeUndefined();
 });

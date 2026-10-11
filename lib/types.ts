@@ -124,6 +124,9 @@ export type ProviderOrder = {
   expectedPriceId?: string;
   expectedAmountSubtotal?: number;
   expectedCurrency?: string;
+  paymentReviewHold?: boolean;
+  paymentFailureObserved?: boolean;
+  paymentFailureIntentId?: string;
   billingStatus?: "awaiting_payment" | "paid" | "partially_refunded" | "refunded";
   amountSubtotal?: number;
   amountTotal?: number;

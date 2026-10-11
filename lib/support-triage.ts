@@ -5,6 +5,8 @@ export type SupportItem = { reference: string; reason: string; nextStep: string 
 // Whitelist metadata only. Never copy lastError, source text, tokens or provider payloads.
 export function supportItem(collection: SupportCollection, reference: string, data: Record<string, unknown>): SupportItem | null {
   const item = (reason: string, nextStep: string) => ({ reference, reason, nextStep });
+  if (data.paymentReviewHold === true || data.paymentFailureObserved === true)
+    return item("Payment needs reconciliation", "Verify the saved Checkout attempt and current Stripe payment state before retry. Do not initiate a refund or a second payment without reconciliation.");
   if (data.needsHumanReview === true || data.providerSubmissionUncertain === true)
     return item("Outcome needs human reconciliation", "Inspect the existing reconciliation workflow. Confirm supplier acceptance before authorizing a retry.");
   if (collection === "directorySubmissions" && data.status === "needs_customer")

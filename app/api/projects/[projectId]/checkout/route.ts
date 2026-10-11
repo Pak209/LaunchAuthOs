@@ -1,8 +1,9 @@
+import { CheckoutRecoveryConflict } from "@/lib/checkout-recovery";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getFirebaseAdminDb, isFirebaseAdminExplicitlyConfigured } from "@/lib/firebase/admin";
 import { getAuthenticatedFirebaseContext } from "@/lib/firebase/server";
-import { bindCheckoutSession, clearExpiredCheckoutSession, loadFulfillmentState } from "@/lib/fulfillment";
+import { bindCheckoutSession, assertCheckoutStillCurrent, clearExpiredCheckoutSession, loadFulfillmentState } from "@/lib/fulfillment";
 import { loadProject } from "@/lib/persistence";
 import { campaignDigest } from "@/lib/campaign-approval";
 import { checkoutIdempotencyKey, getStripeClient, getStripePriceId, isStripeLiveMode } from "@/lib/stripe";
@@ -43,15 +44,18 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     assertCurrentPackageContract(fulfillment.order.packageContract, fulfillment.order);
     const priceId = getStripePriceId(packageId);
     if (fulfillment.order.packageContract.environment === "live" && fulfillment.order.packageContract.priceId !== priceId) throw new Error("Package price changed after preparation. Checkout is disabled pending reconciliation.");
+    if (fulfillment.order.paymentReviewHold) throw new CheckoutRecoveryConflict("Payment requires support reconciliation before another checkout.");
     const stripe = getStripeClient();
     let checkoutAttempt = fulfillment.order.checkoutAttempt ?? 0;
     if (fulfillment.order.stripeCheckoutSessionId) {
       if (fulfillment.order.expectedPackageId !== packageId) throw new Error("A checkout session for another package is already active.");
-      const existing = await stripe.checkout.sessions.retrieve(fulfillment.order.stripeCheckoutSessionId);
+      const existing = await stripe.checkout.sessions.retrieve(fulfillment.order.stripeCheckoutSessionId, { expand: ["payment_intent"] });
       if (existing.livemode !== livemode) throw new Error("The checkout session mode does not match the configured Stripe environment.");
-      if (existing.status === "open" && existing.url) return NextResponse.json({ url: existing.url });
-      if (existing.status === "complete") throw new Error("Payment is already being processed for this order.");
-      checkoutAttempt = await clearExpiredCheckoutSession(adminDb, user.uid, projectId, existing.id);
+      if (existing.status === "open" && existing.url) {
+        await assertCheckoutStillCurrent(adminDb, user.uid, projectId, existing.id, checkoutAttempt);
+        return NextResponse.json({ url: existing.url });
+      }
+      checkoutAttempt = await clearExpiredCheckoutSession(adminDb, user.uid, projectId, existing.id, existing);
     }
     const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
     const price = await stripe.prices.retrieve(priceId);
@@ -84,10 +88,11 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       checkoutAttempt,
       livemode: session.livemode,
     });
+    await assertCheckoutStillCurrent(adminDb, user.uid, projectId, session.id, checkoutAttempt);
     return NextResponse.json({ url: session.url });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to start checkout.";
-    const status = error instanceof RateLimitError ? 429 : error instanceof z.ZodError ? 400 : message.includes("Authentication") ? 401 : message.includes("configured") ? 503 : message.includes("Approve") || message.includes("eligible") || message.includes("disabled") || message.includes("Verify") ? 409 : 500;
+    const status = error instanceof CheckoutRecoveryConflict ? 409 : error instanceof RateLimitError ? 429 : error instanceof z.ZodError ? 400 : message.includes("Authentication") ? 401 : message.includes("configured") ? 503 : message.includes("Approve") || message.includes("eligible") || message.includes("disabled") || message.includes("Verify") ? 409 : 500;
     return NextResponse.json({ error: message }, { status, headers: error instanceof RateLimitError ? { "retry-after": String(error.retryAfterSeconds) } : undefined });
   }
 }

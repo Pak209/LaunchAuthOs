@@ -23,7 +23,7 @@ export function customerFulfillment(state: FulfillmentState) {
   }
   return {
     order: order ? {
-      ...pick(order, ["id", "provider", "sandbox", "nonBillable", "currency", "selectedPackageId", "campaignVersion", "status", "billingStatus", "amountSubtotal", "amountTotal", "refundedAmountCents", "refundedAt", "createdAt", "updatedAt"]),
+      ...pick(order, ["id", "provider", "sandbox", "nonBillable", "currency", "selectedPackageId", "campaignVersion", "status", "billingStatus", "paymentReviewHold", "paymentFailureObserved", "amountSubtotal", "amountTotal", "refundedAmountCents", "refundedAt", "createdAt", "updatedAt"]),
       ...(contract ? { packageContract: pick(contract, ["schemaVersion", "revision", "packageId", "environment", "providerSubmission", "directoryIds"]) } : {}),
     } : null,
     directories: state.directories.map(item => ({

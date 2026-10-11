@@ -71,6 +71,15 @@ describe("signed delayed Checkout sequences with real payment transaction", () =
     expect(db.read(`${path}/orders/current`)).toEqual(before);
     expect(db.rows.has("stripeEvents/evt_changed")).toBe(false);
   });
+  it("keeps failure bound to its intent and clears customer failure status after valid success", async () => {
+    expect((await send("checkout.session.async_payment_failed", "evt_failed", { payment_status: "unpaid" })).status).toBe(200);
+    expect(db.read(`${path}/orders/current`)).toMatchObject({ paymentFailureObserved: true, paymentFailureIntentId: "pi_delayed" });
+    expect((await send("checkout.session.async_payment_failed", "evt_other_failure", { payment_status: "unpaid", payment_intent: "pi_other" })).status).toBe(400);
+    expect((await send("checkout.session.async_payment_succeeded", "evt_wrong_success", { payment_intent: "pi_other" })).status).toBe(400);
+    expect((await send("checkout.session.async_payment_succeeded", "evt_success")).status).toBe(200);
+    expect(db.read(`${path}/orders/current`).paymentFailureObserved).toBeUndefined();
+    expect(db.read(`${path}/orders/current`).paymentFailureIntentId).toBeUndefined();
+  });
   it("never queues failed delayed payment", async () => {
     expect((await send("checkout.session.async_payment_failed", "evt_failed", { payment_status: "unpaid" })).status).toBe(200);
     expect(db.read(`${path}/jobs/provider_submission_current`).status).toBe("blocked");
@@ -87,4 +96,10 @@ describe("signed delayed Checkout sequences with real payment transaction", () =
     expect((await send("checkout.session.async_payment_succeeded", "evt_bad", {}, {}, false)).status).toBe(400);
     expect(db.read(`${path}/jobs/provider_submission_current`).status).toBe("blocked");
   });
+});
+
+it("rejects contradictory failure snapshots before recording any failure", async () => {
+  expect((await send("checkout.session.async_payment_failed", "evt_contradiction")).status).toBe(400);
+  expect(db.rows.has("stripeEvents/evt_contradiction")).toBe(false);
+  expect(db.read(`${path}/orders/current`).paymentFailureObserved).toBeUndefined();
 });
