@@ -1,3 +1,4 @@
+import { isSafeWorkspaceId } from "./identity";
 export const supportCollections = ["jobs", "intelligenceJobs", "directorySubmissions", "orders", "adminOperations"] as const;
 export type SupportCollection = typeof supportCollections[number];
 export type SupportItem = { reference: string; reason: string; nextStep: string };
@@ -16,6 +17,10 @@ export function supportItem(collection: SupportCollection, reference: string, da
   return null;
 }
 export function validSupportReference(collection: SupportCollection, path: string) {
-  const segment = "[A-Za-z0-9_-]{1,160}";
-  return new RegExp(collection === "intelligenceJobs" ? `^workspaces/${segment}/intelligenceJobs/${segment}$` : `^workspaces/${segment}/projects/[a-f0-9]{24}/${collection}/${segment}$`).test(path);
+  const parts = path.split("/");
+  if (parts[0] !== "workspaces" || !isSafeWorkspaceId(parts[1])) return false;
+  const segment = /^[A-Za-z0-9_-]{1,160}$/;
+  return collection === "intelligenceJobs"
+    ? parts.length === 4 && parts[2] === collection && segment.test(parts[3])
+    : parts.length === 6 && parts[2] === "projects" && /^[a-f0-9]{24}$/.test(parts[3]) && parts[4] === collection && segment.test(parts[5]);
 }

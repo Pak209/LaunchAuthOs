@@ -1,3 +1,5 @@
+const adminFixture = vi.hoisted(() => ({ db: null as unknown }));
+vi.mock("../lib/firebase/admin", () => ({ isFirebaseAdminExplicitlyConfigured: () => true, getFirebaseAdminDb: () => adminFixture.db }));
 import { beforeEach as configureBeforeEach, afterEach as restoreAfterEach } from "vitest";
 import { configureSyntheticLiveContract } from "./helpers/package-contract";
 configureBeforeEach(configureSyntheticLiveContract);
@@ -98,6 +100,8 @@ const quote = { provider: "prnow", sandbox: false, nonBillable: false, currency:
 
 function fixture() {
   const db = new MemoryFirestore();
+  adminFixture.db = db.asFirestore();
+  db.seed(workspacePath, { createdBy: uid });
   const result = analysis();
   db.seed(`${workspacePath}/members/${uid}`, { userId: uid, role: "owner" });
   db.seed(projectPath, {

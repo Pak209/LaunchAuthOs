@@ -1,3 +1,4 @@
+import { isSafeWorkspaceId } from "../../../../lib/identity";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -11,12 +12,12 @@ import type { ProviderOrder } from "@/lib/types";
 
 const bodySchema = z.discriminatedUnion("action", [
   z.object({
-    workspaceId: z.string().regex(/^[A-Za-z0-9_-]{1,160}$/),
+    workspaceId: z.string().refine(isSafeWorkspaceId, "Invalid workspace identifier."),
     projectId: z.string().regex(/^[a-f0-9]{24}$/),
     action: z.literal("cancel_provider"),
   }),
   z.object({
-    workspaceId: z.string().regex(/^[A-Za-z0-9_-]{1,160}$/),
+    workspaceId: z.string().refine(isSafeWorkspaceId, "Invalid workspace identifier."),
     projectId: z.string().regex(/^[a-f0-9]{24}$/),
     action: z.literal("refund_customer"),
     amountCents: z.number().int().positive().optional(),

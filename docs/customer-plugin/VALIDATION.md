@@ -243,3 +243,32 @@ Local validation: 599 unit tests / 43 files; typecheck and production build;
 cases; five offline plugin preflight tests. Independent review found and closed a
 standard-mode policy mismatch and reran 15 access/session tests successfully.
 No live settings/accounts, credentials, source upload or deployment were made.
+
+## 2026-10-11 bounded audit corrections
+
+See AUDIT-FOLLOWUP.md for independently reproduced evidence, fixes, conditional
+impact and remaining failed delayed-payment recovery limitation. Final checks:
+
+- `npm test`: **638 passed / 45 files**.
+- Guarded local Firestore emulator: **109 passed / 7 files**, including six
+  namespace/bootstrap cases and two additional payment concurrency/replay cases.
+  Uses only `demo-launch-order-lock`, loopback and synthetic identities/data.
+- `npm run lint` (`tsc --noEmit`), `npm run build`, `git diff --check`: passed.
+- `node --test scripts/customer-plugin-preflight.test.mjs`: **5 passed**.
+- Original audit baseline copy: **4 passed / 2 files**, independently rerun.
+- Independent code review: 167 focused tests, then 55 identity/Stripe tests after
+  fixing its additional Unicode HTTP-header finding; no remaining scoped must-fix.
+  Reviewer did not independently execute emulator tests or full original attack.
+
+Intermediate unit fixture failures (128) and first emulator run (17 failed, 92
+passed) exposed outdated workspace fixtures after server bootstrap/namespace
+hardening. Fixtures now establish the actual personal owner and inject the real
+emulator Admin handle. Legacy foreign member edits explicitly deny; original
+owner order-lock and real commit-race assertions remain. Final runs above pass.
+
+Not run: live Stripe method/subscription/payment acceptance, failed delayed-session
+recovery, live Auth0 linking, cloud rollout, ChatGPT connection, public approval.
+No live mutations or paid calls. Original checkout's dirty next-env.d.ts remains
+untouched. Pre-push remote inspection: workflows 0, hooks 0, deployments 0; absence
+of remote CI is not a passing CI result. Source archive and approval plan are
+regenerated outside the repo from the exact final commit, with a separate hash.

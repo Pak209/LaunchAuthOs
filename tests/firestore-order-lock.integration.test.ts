@@ -21,11 +21,13 @@ vi.mock("firebase/firestore", async (importOriginal) => ({
 // configured local emulator). Fail closed before constructing either SDK.
 const projectId = "demo-launch-order-lock";
 const emulatorHost = "127.0.0.1:18891";
-const ownerId = "order-lock-owner";
+let ownerId: string;
 const clientApps: FirebaseApp[] = [];
 const clients = new Map<string, Firestore>();
 let adminApp: App;
 let admin: AdminFirestore;
+// Inject only the configured Admin handle; all database operations remain real.
+vi.mock("../lib/firebase/admin", () => ({ isFirebaseAdminExplicitlyConfigured: () => true, getFirebaseAdminDb: () => admin }));
 let workspaceId: string;
 let projectPath: string;
 
@@ -97,11 +99,12 @@ beforeAll(() => {
 beforeEach(async () => {
   await admin.doc("deploymentAccess/current").set({ mode: "standard" });
   const suffix = randomUUID().replaceAll("-", "");
-  workspaceId = `order_lock_${suffix}`;
+  ownerId = `order-lock-${suffix}`;
+  workspaceId = `personal_${ownerId}`;
   projectPath = `workspaces/${workspaceId}/projects/${suffix.slice(0, 24)}`;
   const batch = admin.batch();
   batch.set(admin.doc(`workspaces/${workspaceId}`), { createdBy: ownerId });
-  for (const [uid, role] of [[ownerId, "owner"], ["workspace-admin", "admin"], ["workspace-member", "member"]]) {
+  for (const [uid, role] of [[ownerId, "owner"]]) {
     batch.set(admin.doc(`workspaces/${workspaceId}/members/${uid}`), { userId: uid, role });
   }
   await batch.commit();
@@ -156,13 +159,14 @@ describe("local Firestore order-lock rules", () => {
     await deleteDoc(doc(db, `${projectPath}/campaigns/current/versions/000002`));
   });
 
-  it.each(["workspace-admin", "workspace-member"])("preserves unlocked edits by %s", async (uid) => {
+  it.each(["workspace-admin", "workspace-member"])("denies legacy foreign member %s edits in a personal workspace", async (uid) => {
     await seedProject();
+    await admin.doc(`workspaces/${workspaceId}/members/${uid}`).set({ userId: uid, role: uid === "workspace-admin" ? "admin" : "member" });
     const db = client(uid);
-    await updateDoc(doc(db, projectPath), { name: "Allowed workspace edit" });
-    await updateDoc(doc(db, `${projectPath}/profiles/current`), { company: "Allowed workspace edit" });
-    await updateDoc(doc(db, `${projectPath}/claims/claim-1`), { approved: false });
-    await updateDoc(doc(db, `${projectPath}/campaigns/current`), { status: "draft" });
+    await denied(updateDoc(doc(db, projectPath), { name: "Foreign edit" }));
+    await denied(updateDoc(doc(db, `${projectPath}/profiles/current`), { company: "Foreign edit" }));
+    await denied(updateDoc(doc(db, `${projectPath}/claims/claim-1`), { approved: false }));
+    await denied(updateDoc(doc(db, `${projectPath}/campaigns/current`), { status: "draft" }));
   });
 
   it.each(["quote_ready", "awaiting_payment", "paid", "submitted", "processing", "published", "failed", "canceled", "refunded", "missing-status"])("denies all ordinary create/update/delete paths for order status %s", async (status) => {

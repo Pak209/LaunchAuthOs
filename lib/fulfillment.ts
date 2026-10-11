@@ -1,3 +1,4 @@
+import { isSafeUid } from "./identity";
 import { resolvePackageContract, assertFrozenPackageContract, assertCurrentPackageContract } from "./package-contract";
 import { createHash, randomUUID } from "node:crypto";
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
@@ -235,6 +236,7 @@ const directoryTemplates: Array<Pick<DirectorySubmission, "id" | "directory" | "
 ];
 
 function paths(db: Firestore, uid: string, projectId: string) {
+  if (!isSafeUid(uid) || !/^[a-f0-9]{24}$/.test(projectId)) throw new Error("Invalid project identifier.");
   const project = db.doc(`workspaces/personal_${uid}/projects/${projectId}`);
   return { project, order: project.collection("orders").doc("current"), directories: project.collection("directorySubmissions"), jobs: project.collection("jobs"), placements: project.collection("placements") };
 }
@@ -397,7 +399,7 @@ export async function markCheckoutPaid(
   db: Firestore,
   input: PaidCheckout,
 ) {
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(input.uid) || !/^[a-f0-9]{24}$/.test(input.projectId)) throw new Error("The checkout metadata is invalid.");
+  if (!isSafeUid(input.uid) || !/^[a-f0-9]{24}$/.test(input.projectId)) throw new Error("The checkout metadata is invalid.");
   const { project, order, jobs } = paths(db, input.uid, input.projectId);
   const eventRef = db.doc(`stripeEvents/${input.eventId}`);
   const jobRef = jobs.doc("provider_submission_current");
@@ -408,7 +410,24 @@ export async function markCheckoutPaid(
     ]);
     if (eventSnapshot.exists) return;
     if (!projectSnapshot.exists || projectSnapshot.data()?.createdBy !== input.uid || !orderSnapshot.exists) throw new Error("The paid order could not be matched to a project.");
-    assertPaidCheckoutMatchesOrder(orderSnapshot.data() as ProviderOrder, input);
+    const savedOrder = orderSnapshot.data() as ProviderOrder;
+    if (savedOrder.stripePaymentIntentId && ["paid", "partially_refunded", "refunded"].includes(savedOrder.billingStatus ?? "")) {
+      // A distinct signed event can describe the same settled Checkout Session.
+      // Validate both its original binding and recorded settlement, then only record
+      // receipt: never reopen refunded orders, requeue work or resend confirmations.
+      assertPaidCheckoutMatchesOrder({ ...savedOrder, status: "awaiting_payment" }, input);
+      if (savedOrder.stripePaymentIntentId !== input.paymentIntentId
+        || savedOrder.stripeLivemode !== input.livemode
+        || savedOrder.packageId !== input.packageId
+        || savedOrder.amountSubtotal !== input.amountSubtotal
+        || savedOrder.amountTotal !== input.amountTotal
+        || savedOrder.currency !== input.currency) {
+        throw new Error("The repeated checkout does not match the settled payment.");
+      }
+      transaction.create(eventRef, { type: "checkout.session.completed", duplicateSettlement: true, processedAt: FieldValue.serverTimestamp() });
+      return;
+    }
+    assertPaidCheckoutMatchesOrder(savedOrder, input);
     transaction.create(eventRef, { type: "checkout.session.completed", processedAt: FieldValue.serverTimestamp() });
     transaction.update(order, {
       status: "paid", billingStatus: "paid", stripeCheckoutSessionId: input.sessionId, stripePaymentIntentId: input.paymentIntentId,

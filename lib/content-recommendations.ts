@@ -1,3 +1,4 @@
+import { isSafeUid } from "./identity";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Brief } from "./companion/model";
@@ -17,7 +18,7 @@ export function recommendContent(brief: Brief, revision: number, campaignVersion
 export class ContentRecommendationService {
   constructor(private db: Firestore) {}
   async access(tx: FirebaseFirestore.Transaction, uid: string, id: string) {
-    if (!/^[a-f0-9]{24}$/.test(id) || !uid || /[/\x00-\x1f]/.test(uid)) throw new AccessError(400, "Invalid identifier.");
+    if (!/^[a-f0-9]{24}$/.test(id) || !isSafeUid(uid)) throw new AccessError(400, "Invalid identifier.");
     const project = this.db.doc(`workspaces/personal_${uid}/projects/${id}`);
     const [p, m, c, r] = await Promise.all([tx.get(project), tx.get(this.db.doc(`workspaces/personal_${uid}/members/${uid}`)), tx.get(project.collection("campaigns").doc("current")), tx.get(project.collection("contentRecommendations").doc("current"))]);
     if (m.data()?.userId !== uid || m.data()?.role !== "owner") throw new AccessError(403, "Owner access required.");

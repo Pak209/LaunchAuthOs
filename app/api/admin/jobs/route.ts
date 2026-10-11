@@ -1,3 +1,4 @@
+import { isSafeWorkspaceId } from "../../../../lib/identity";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { FieldValue } from "firebase-admin/firestore";
@@ -8,7 +9,7 @@ import { assertJobCanRetry } from "@/lib/fulfillment";
 import type { JobRun } from "@/lib/types";
 
 const bodySchema = z.object({
-  workspaceId: z.string().regex(/^[A-Za-z0-9_-]{1,160}$/),
+  workspaceId: z.string().refine(isSafeWorkspaceId, "Invalid workspace identifier."),
   projectId: z.string().regex(/^[a-f0-9]{24}$/),
   jobId: z.string().regex(/^[A-Za-z0-9_-]{1,160}$/),
   action: z.enum(["retry", "cancel"]),

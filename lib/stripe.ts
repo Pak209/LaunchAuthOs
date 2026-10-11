@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { isSafeUid } from "./identity";
 import Stripe from "stripe";
 
 export type PackageId = "launch" | "authority" | "authority_plus";
@@ -32,4 +34,13 @@ export function getStripeWebhookSecret() {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) throw new Error("Stripe webhooks are not configured yet.");
   return secret;
+}
+
+/** Preserve deployed ASCII keys; encode custom identities safely for HTTP headers. */
+export function checkoutIdempotencyKey(uid: string, projectId: string, attempt: number, packageId: PackageId) {
+  if (!isSafeUid(uid) || !/^[a-f0-9]{24}$/.test(projectId) || !Number.isSafeInteger(attempt) || attempt < 0
+    || !["launch", "authority", "authority_plus"].includes(packageId)) throw new Error("Invalid checkout identity.");
+  const legacy = `checkout_${uid}_${projectId}_${attempt}_${packageId}`;
+  return /^[\x20-\x7e]+$/.test(legacy) ? legacy
+    : `checkout_unicode_${createHash("sha256").update(JSON.stringify([uid, projectId, attempt, packageId])).digest("hex")}`;
 }

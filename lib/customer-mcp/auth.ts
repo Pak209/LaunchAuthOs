@@ -1,3 +1,4 @@
+import { isSafeUid } from "../identity";
 import { createHash } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
 
@@ -46,6 +47,6 @@ export async function authenticate(header: string | null, config: Config, keys: 
   const granted = typeof claims.scope === "string" ? claims.scope.split(" ").filter(Boolean) : [];
   if (!scopes.some(scope => granted.includes(scope))) throw new AccessError(403, "Required permission missing.");
   const uid = await resolve(config.issuer, claims.sub!);
-  if (!uid || uid.length > 128 || /[/\x00-\x1f]/.test(uid) || uid === "." || uid === "..") throw new AccessError(403, "Account linking required.");
+  if (!isSafeUid(uid)) throw new AccessError(403, "Account linking required.");
   return { uid, scopes: granted };
 }

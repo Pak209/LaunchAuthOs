@@ -1,3 +1,6 @@
+import { isSafeUid } from "./identity";
+import { bootstrapPersonalWorkspace } from "./personal-workspace";
+import { getFirebaseAdminDb, isFirebaseAdminExplicitlyConfigured } from "./firebase/admin";
 import { createHash } from "node:crypto";
 import type { User } from "firebase/auth";
 import {
@@ -85,30 +88,11 @@ function projectDocumentId(uid: string, url: string): string {
 }
 
 export async function ensureWorkspace(db: Firestore, user: User): Promise<string> {
-  const workspaceId = personalWorkspaceId(user.uid);
-  const workspaceRef = doc(db, "workspaces", workspaceId);
-  const memberRef = doc(db, "workspaces", workspaceId, "members", user.uid);
+  if (!isSafeUid(user.uid) || !isFirebaseAdminExplicitlyConfigured()) throw new Error("Workspace access denied.");
+  const workspaceId = await bootstrapPersonalWorkspace(getFirebaseAdminDb(), user.uid);
   await setDoc(doc(db, "users", user.uid), {
-    email: user.email ?? null,
-    displayName: user.displayName ?? null,
-    lastSeenAt: serverTimestamp(),
+    email: user.email ?? null, displayName: user.displayName ?? null, lastSeenAt: serverTimestamp(),
   }, { merge: true });
-  if ((await getDoc(memberRef)).exists()) return workspaceId;
-
-  const batch = writeBatch(db);
-  batch.set(workspaceRef, {
-    name: "My Launch Workspace",
-    createdBy: user.uid,
-    billingStatus: "not_configured",
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
-  batch.set(memberRef, {
-    userId: user.uid,
-    role: "owner",
-    createdAt: serverTimestamp(),
-  });
-  await batch.commit();
   return workspaceId;
 }
 

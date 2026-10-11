@@ -14,20 +14,28 @@ export async function POST(request: Request) {
     const event = stripe.webhooks.constructEvent(await request.text(), signature, getStripeWebhookSecret());
     if (event.livemode !== isStripeLiveMode()) throw new Error("The webhook mode does not match the configured Stripe environment.");
     const adminDb = getFirebaseAdminDb();
-    if (event.type === "checkout.session.completed") {
+    if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded" || event.type === "checkout.session.async_payment_failed") {
       const session = event.data.object as Stripe.Checkout.Session;
       if (session.livemode !== event.livemode) throw new Error("The checkout session mode does not match the signed event.");
       const packageId = session.metadata?.packageId;
       const checkoutAttempt = Number(session.metadata?.checkoutAttempt);
-      if (session.payment_status !== "paid"
-        || !session.metadata?.uid
+      if (!session.metadata?.uid
         || !session.metadata.projectId
         || !session.metadata.priceId
         || (packageId !== "launch" && packageId !== "authority" && packageId !== "authority_plus")
+        || !session.metadata?.checkoutAttempt
         || !Number.isSafeInteger(checkoutAttempt)
         || checkoutAttempt < 0) {
         throw new Error("The completed checkout is missing paid project metadata.");
       }
+      // Completion can precede settlement. Neither pending completion nor a failure
+      // authorizes fulfillment or reverses an already-confirmed payment.
+      if (session.mode !== "payment") throw new Error("Unexpected checkout session mode.");
+      if (event.type === "checkout.session.async_payment_failed"
+        || (event.type === "checkout.session.completed" && session.payment_status === "unpaid")) {
+        return NextResponse.json({ received: true });
+      }
+      if (session.payment_status !== "paid") throw new Error("The checkout payment has not succeeded.");
       const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
       if (!paymentIntentId) throw new Error("The completed checkout has no payment intent.");
       await markCheckoutPaid(adminDb, {

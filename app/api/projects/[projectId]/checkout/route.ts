@@ -5,7 +5,7 @@ import { getAuthenticatedFirebaseContext } from "@/lib/firebase/server";
 import { bindCheckoutSession, clearExpiredCheckoutSession, loadFulfillmentState } from "@/lib/fulfillment";
 import { loadProject } from "@/lib/persistence";
 import { campaignDigest } from "@/lib/campaign-approval";
-import { getStripeClient, getStripePriceId, isStripeLiveMode } from "@/lib/stripe";
+import { checkoutIdempotencyKey, getStripeClient, getStripePriceId, isStripeLiveMode } from "@/lib/stripe";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
 import { assertSameOrigin } from "@/lib/request-security";
 import { assertCheckoutReadiness } from "@/lib/readiness";
@@ -70,7 +70,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       payment_intent_data: { metadata },
       success_url: `${origin}/?checkout=success&project=${projectId}`,
       cancel_url: `${origin}/?checkout=canceled&project=${projectId}`,
-    }, { idempotencyKey: `checkout_${user.uid}_${projectId}_${checkoutAttempt}_${packageId}` });
+    }, { idempotencyKey: checkoutIdempotencyKey(user.uid, projectId, checkoutAttempt, packageId) });
     if (!session.url) throw new Error("Stripe did not return a checkout URL.");
     if (session.livemode !== livemode) throw new Error("The checkout session mode does not match the configured Stripe environment.");
     await bindCheckoutSession(adminDb, {

@@ -1,3 +1,4 @@
+import { isSafeUid } from "../identity";
 import type { Firestore, QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { z } from "zod";
 import { AccessError } from "../customer-mcp/auth";
@@ -11,7 +12,7 @@ const blocked = () => new AccessError(409, "Deletion blocked: this project has p
  * the entire bounded draft tree commits atomically or no content is removed. */
 export async function deleteCompanionProject(db: Firestore, uid: string, id: string, input: unknown) {
   const args = deleteSchema.parse(input);
-  if (!uid || /[/\x00-\x1f]/.test(uid) || !/^[a-f0-9]{24}$/.test(id)) throw new AccessError(400, "Invalid identifier.");
+  if (!isSafeUid(uid) || !/^[a-f0-9]{24}$/.test(id)) throw new AccessError(400, "Invalid identifier.");
   if (args.confirmation !== `DELETE ${id}`) throw new AccessError(400, "Type DELETE followed by this exact project ID.");
   const workspace = db.doc(`workspaces/personal_${uid}`), project = workspace.collection("projects").doc(id), receipt = workspace.collection("companionDeletions").doc(id);
   // Schema inventory is read-only. Known producer paths are also read in the

@@ -1,3 +1,4 @@
+import { isSafeUid } from "./identity";
 import { getFirebaseAdminDb, isFirebaseAdminExplicitlyConfigured } from "./firebase/admin";
 
 export function deploymentAccessMode(): "standard" | "restricted" {
@@ -16,6 +17,7 @@ function approvedUids() {
 }
 /** Only call with a provider-verified UID, never a request body's identity. */
 export async function assertDeploymentAccess(uid: string, readPolicy?: () => Promise<unknown>) {
+  if (!isSafeUid(uid)) throw new Error("Authentication required.");
   const mode = deploymentAccessMode();
   const deployed = !["development", "test"].includes(process.env.NODE_ENV ?? "") || Boolean(process.env.K_SERVICE || process.env.VERCEL);
   if (mode === "standard" && !deployed) return;

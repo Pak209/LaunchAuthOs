@@ -1,3 +1,4 @@
+import { isSafeUid } from "./identity";
 import { randomUUID } from "node:crypto";
 import { FieldValue, type DocumentReference, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { runSiteDiagnostics } from "./site-diagnostics";
@@ -35,7 +36,7 @@ export class SiteDiagnosticJobError extends Error {
 }
 
 function references(db: Firestore, uid: string, projectId: string) {
-  if (!/^[^/\u0000-\u001f]{1,128}$/.test(uid) || !/^[a-f0-9]{24}$/.test(projectId)) throw new SiteDiagnosticJobError("Invalid project identifier.", 400);
+  if (!isSafeUid(uid) || !/^[a-f0-9]{24}$/.test(projectId)) throw new SiteDiagnosticJobError("Invalid project identifier.", 400);
   const workspaceId = `personal_${uid}`;
   const workspace = db.doc(`workspaces/${workspaceId}`);
   return {

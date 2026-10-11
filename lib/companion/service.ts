@@ -1,3 +1,5 @@
+import { inspectPersonalWorkspace, WorkspaceAccessError } from "../personal-workspace";
+import { isSafeUid } from "../identity";
 import { createHash } from "node:crypto";
 import type { Firestore, Transaction, DocumentReference } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
@@ -6,9 +8,13 @@ import type { CampaignDraft, Claim } from "../types";
 import { AccessError } from "../customer-mcp/auth";
 import { archiveSchema, approveCampaignSchema, approveFactsSchema, briefSchema, contextBundle, draftSchema, emptyBrief, saveBriefSchema, type Brief } from "./model";
 import { legacySourceHistory, writeOperationalEvent } from "./retention";
+async function inspectWorkspace(db: Firestore, tx: Transaction, uid: string, create = false) {
+  try { return await inspectPersonalWorkspace(db, tx, uid, create); }
+  catch (error) { if (error instanceof WorkspaceAccessError) throw new AccessError(403, "Workspace access denied."); throw error; }
+}
 const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex");
 function refs(db: Firestore, uid: string, id: string) {
-  if (!/^[a-f0-9]{24}$/.test(id) || !uid || /[/\x00-\x1f]/.test(uid)) throw new AccessError(400, "Invalid identifier.");
+  if (!/^[a-f0-9]{24}$/.test(id) || !isSafeUid(uid)) throw new AccessError(400, "Invalid identifier.");
   const workspace = db.doc(`workspaces/personal_${uid}`), project = workspace.collection("projects").doc(id);
   return { workspace, project, member: workspace.collection("members").doc(uid), campaign: project.collection("campaigns").doc("current"), order: project.collection("orders").doc("current") };
 }
@@ -22,6 +28,7 @@ export class CompanionService {
   constructor(private db: Firestore) {}
   async read(uid: string, id: string) {
     const r = refs(this.db, uid, id);
+    await this.db.runTransaction(tx => inspectWorkspace(this.db, tx, uid));
     const [p, m, c, o] = await Promise.all([r.project.get(), r.member.get(), r.campaign.get(), r.order.get()]);
     if (!p.exists && m.data()?.userId === uid && (await r.workspace.collection("companionDeletions").doc(id).get()).exists) throw new AccessError(410, "This project was deleted from active app storage. Account and backup data were not erased.");
     check(p.data(), m.data(), uid, false, o.exists);
@@ -33,6 +40,7 @@ export class CompanionService {
   async archive(uid: string, id: string, input: unknown) {
     const args = archiveSchema.parse(input), r = refs(this.db, uid, id);
     return this.db.runTransaction(async tx => {
+      await inspectWorkspace(this.db, tx, uid);
       const [p, m, o] = await Promise.all([tx.get(r.project), tx.get(r.member), tx.get(r.order)]);
       check(p.data(), m.data(), uid, false, o.exists);
       if (m.data()?.role !== "owner" || !p.data()?.brief) throw new AccessError(403, "Owner access required.");
@@ -51,6 +59,7 @@ export class CompanionService {
   async saveBrief(uid: string, id: string, input: unknown, create = false) {
     const payload = saveBriefSchema.parse(input), r = refs(this.db, uid, id);
     return this.db.runTransaction(async tx => {
+      await inspectWorkspace(this.db, tx, uid, create);
       const [p, m, w, c, o, deleted] = await Promise.all([tx.get(r.project), tx.get(r.member), tx.get(r.workspace), tx.get(r.campaign), tx.get(r.order), tx.get(r.workspace.collection("companionDeletions").doc(id))]);
       if (deleted.exists) throw new AccessError(409, "This project was deleted. Create a new project ID.");
       const data = p.data();
@@ -89,6 +98,7 @@ export class CompanionService {
   async approveFacts(uid: string, id: string, input: unknown) {
     const args = approveFactsSchema.parse(input), r = refs(this.db, uid, id);
     return this.db.runTransaction(async tx => {
+      await inspectWorkspace(this.db, tx, uid);
       const [p, m, c, o] = await Promise.all([tx.get(r.project), tx.get(r.member), tx.get(r.campaign), tx.get(r.order)]);
       check(p.data(), m.data(), uid, true, o.exists);
       if (p.data()?.briefRevision !== args.expectedRevision) throw new AccessError(409, "Brief changed. Reload before approving.");
@@ -105,6 +115,7 @@ export class CompanionService {
   async saveDraft(uid: string, id: string, input: unknown) {
     const args = draftSchema.parse(input), r = refs(this.db, uid, id), receipt = r.project.collection("companionRequests").doc(args.requestId), digest = hash(args);
     return this.db.runTransaction(async tx => {
+      await inspectWorkspace(this.db, tx, uid);
       const [p, m, c, o, prior] = await Promise.all([tx.get(r.project), tx.get(r.member), tx.get(r.campaign), tx.get(r.order), tx.get(receipt)]);
       check(p.data(), m.data(), uid, true, o.exists);
       if (prior.exists) { if (prior.data()?.digest !== digest) throw new AccessError(409, "Request ID was already used for different content."); return { version: prior.data()!.version as number, duplicate: true }; }
@@ -123,6 +134,7 @@ export class CompanionService {
   async approveCampaign(uid: string, id: string, input: unknown) {
     const args = approveCampaignSchema.parse(input), r = refs(this.db, uid, id);
     return this.db.runTransaction(async tx => {
+      await inspectWorkspace(this.db, tx, uid);
       const [p, m, c, o] = await Promise.all([tx.get(r.project), tx.get(r.member), tx.get(r.campaign), tx.get(r.order)]);
       check(p.data(), m.data(), uid, true, o.exists);
       const current = c.data() as CampaignDraft | undefined;

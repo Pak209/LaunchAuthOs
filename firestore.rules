@@ -35,7 +35,12 @@ service cloud.firestore {
     }
 
     function isMember(workspaceId) {
-      return signedIn() && exists(membershipPath(workspaceId));
+      return signedIn() && workspaceId == 'personal_' + request.auth.uid
+        && exists(/databases/$(database)/documents/workspaces/$(workspaceId))
+        && get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid
+        && exists(membershipPath(workspaceId))
+        && get(membershipPath(workspaceId)).data.userId == request.auth.uid
+        && get(membershipPath(workspaceId)).data.role == 'owner';
     }
 
     function memberRole(workspaceId) {
@@ -71,24 +76,17 @@ service cloud.firestore {
 
     match /workspaces/{workspaceId} {
       allow read: if isMember(workspaceId);
-      allow create: if signedIn()
-        && request.resource.data.createdBy == request.auth.uid;
+      // Bootstrap uses a server transaction that rejects orphan/foreign members.
+      allow create: if false;
       allow update: if canAdmin(workspaceId)
         && request.resource.data.createdBy == resource.data.createdBy;
-      allow delete: if signedIn()
-        && resource.data.createdBy == request.auth.uid;
+      allow delete: if false;
 
       match /members/{memberId} {
         allow read: if isMember(workspaceId);
-        allow create: if signedIn()
-          && memberId == request.auth.uid
-          && request.resource.data.userId == request.auth.uid
-          && request.resource.data.role == 'owner'
-          && getAfter(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid;
+        allow create: if false;
         allow update: if false;
-        allow delete: if signedIn()
-          && memberId == request.auth.uid
-          && resource.data.role == 'owner';
+        allow delete: if false;
       }
 
       match /projects/{projectId} {

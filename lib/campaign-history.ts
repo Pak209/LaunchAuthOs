@@ -1,3 +1,4 @@
+import { isSafeUid } from "./identity";
 import { createHash } from "node:crypto";
 import { FieldValue, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { z } from "zod";
@@ -38,7 +39,7 @@ export class CampaignHistoryError extends Error {
 }
 
 function references(db: Firestore, uid: string, projectId: string) {
-  if (!/^[^/\u0000-\u001f]{1,128}$/.test(uid) || !/^[a-f0-9]{24}$/.test(projectId)) throw new CampaignHistoryError("Invalid project identifier.", 400);
+  if (!isSafeUid(uid) || !/^[a-f0-9]{24}$/.test(projectId)) throw new CampaignHistoryError("Invalid project identifier.", 400);
   const workspaceId = `personal_${uid}`;
   const workspace = db.doc(`workspaces/${workspaceId}`);
   const project = workspace.collection("projects").doc(projectId);

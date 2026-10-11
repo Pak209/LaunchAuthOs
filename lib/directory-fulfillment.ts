@@ -1,3 +1,4 @@
+import { isSafeUid, isSafeWorkspaceId } from "./identity";
 import { assertFrozenPackageContract } from "./package-contract";
 import { createHash } from "node:crypto";
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
@@ -29,7 +30,7 @@ const evidenceUrl = z.string().trim().min(1).max(2_048).transform((value, contex
 });
 
 export const directoryOperationSchema = z.object({
-  workspaceId: z.string().regex(/^personal_[A-Za-z0-9_-]{1,128}$/),
+  workspaceId: z.string().refine(value => value.startsWith("personal_") && isSafeWorkspaceId(value), "Invalid workspace identifier."),
   projectId: z.string().regex(/^[a-f0-9]{24}$/),
   directoryId: z.enum(["betalist", "uneed", "sourceforge"]),
   requestId: z.string().uuid(),
@@ -104,7 +105,7 @@ function assertPaidWorkAllowed(order: ProviderOrder, campaign: CampaignDraft | u
 /** Internal-admin caller only. Records a human's evidence; never submits or verifies externally. */
 export async function recordDirectoryOperation(db: Firestore, actorId: string, rawInput: DirectoryOperationInput): Promise<DirectoryOperationResult> {
   const input = directoryOperationSchema.parse(rawInput);
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(actorId)) throw new DirectoryOperationConflict("The operator identity is invalid.");
+  if (!isSafeUid(actorId)) throw new DirectoryOperationConflict("The operator identity is invalid.");
   const project = db.doc(`workspaces/${input.workspaceId}/projects/${input.projectId}`);
   const orderRef = project.collection("orders").doc("current");
   const directoryRef = project.collection("directorySubmissions").doc(input.directoryId);

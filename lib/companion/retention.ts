@@ -1,3 +1,4 @@
+import { isSafeUid } from "../identity";
 import type { DocumentReference, Firestore, Transaction } from "firebase-admin/firestore";
 import { AccessError } from "../customer-mcp/auth";
 export const RETENTION_DAYS = 30;
@@ -23,7 +24,7 @@ export function writeOperationalEvent(tx: Transaction, project: DocumentReferenc
  * Live execution requires separate operational approval. Bounded per-project
  * batches can be repeated until candidate counts are zero. */
 export async function applyCompanionRetention(db: Firestore, uid: string, id: string, options: { execute?: boolean; now?: number } = {}) {
-  if (!/^[a-f0-9]{24}$/.test(id) || !uid || /[/\x00-\x1f]/.test(uid)) throw new AccessError(400, "Invalid identifier.");
+  if (!/^[a-f0-9]{24}$/.test(id) || !isSafeUid(uid)) throw new AccessError(400, "Invalid identifier.");
   const now = options.now ?? Date.now();
   if (!Number.isFinite(now)) throw new AccessError(400, "Invalid retention clock.");
   const cutoff = new Date(now - RETENTION_MS).toISOString();

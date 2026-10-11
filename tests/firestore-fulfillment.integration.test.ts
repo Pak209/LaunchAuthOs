@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { initializeApp, deleteApp, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
-import { prepareFulfillment, runQueuedFulfillmentJobs, markPaymentIntentRefunded } from "../lib/fulfillment";
+import { prepareFulfillment, runQueuedFulfillmentJobs, markPaymentIntentRefunded, markCheckoutPaid } from "../lib/fulfillment";
 import { verifyPublicPlacementUrl } from "../lib/placement-verification";
 import { campaignDigest } from "../lib/campaign-approval";
 import { SandboxDistributionProvider, type ProviderSubmission } from "../lib/provider";
@@ -44,7 +44,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.restoreAllMocks(); await db.recursiveDelete(root());
   // Synthetic global receipts created only by this test identity.
-  for (const suffix of ["partial", "full"]) await db.doc(`stripeEvents/${id}_${suffix}`).delete();
+  for (const suffix of ["partial", "full", "checkout_one", "checkout_two", "checkout_late"]) await db.doc(`stripeEvents/${id}_${suffix}`).delete();
 });
 afterAll(async () => { await deleteApp(app); });
 it("submits once under concurrent workers and records verified synthetic publication", async () => {
@@ -109,4 +109,43 @@ it("retries terminal URL errors, stops after three failures, and supports operat
   await pollJob().update({ status: "queued", failureCount: 0 }); await run();
   expect((await pollJob().get()).data()?.status).toBe("complete");
   expect((await project().collection("placements").get()).docs[0].data().state).toBe("published");
+});
+
+
+async function pendingCheckoutFixture() {
+  await order().update({ status: "awaiting_payment", billingStatus: "awaiting_payment", stripePaymentIntentId: null,
+    stripeCheckoutSessionId: `cs_${id}`, checkoutAttempt: 0, expectedStripeLivemode: false,
+    expectedPackageId: "launch", expectedPriceId: "price_Test", expectedAmountSubtotal: 100, expectedCurrency: "usd" });
+  await submissionJob().update({ status: "blocked", blockedReason: "payment_required" });
+  return { uid, projectId: id, sessionId: `cs_${id}`, paymentIntentId: `pi_${id}`, packageId: "launch" as const,
+    priceId: "price_Test", checkoutAttempt: 0, livemode: false, amountSubtotal: 100, amountTotal: 100,
+    currency: "usd", customerEmail: "synthetic@example.invalid" };
+}
+it("settles concurrent distinct Checkout events once with one email and one queued submission", async () => {
+  const payment = await pendingCheckoutFixture();
+  await Promise.all([
+    markCheckoutPaid(db, { ...payment, eventId: `${id}_checkout_one` }),
+    markCheckoutPaid(db, { ...payment, eventId: `${id}_checkout_two` }),
+  ]);
+  expect((await order().get()).data()).toMatchObject({ status: "paid", billingStatus: "paid", stripePaymentIntentId: payment.paymentIntentId });
+  expect((await submissionJob().get()).data()?.status).toBe("queued");
+  const jobs = await project().collection("jobs").get();
+  expect(jobs.docs.filter(item => item.data().type === "customer_email")).toHaveLength(1);
+  expect(jobs.docs.filter(item => item.data().type === "provider_submission")).toHaveLength(1);
+  const receipts = await Promise.all(["checkout_one", "checkout_two"].map(suffix => db.doc(`stripeEvents/${id}_${suffix}`).get()));
+  expect(receipts.filter(item => item.data()?.duplicateSettlement === true)).toHaveLength(1);
+  expect(receipts.every(item => item.exists)).toBe(true);
+  expect(provider.submit).not.toHaveBeenCalled();
+});
+it("preserves full refund and terminal job when a new paid Checkout event arrives late", async () => {
+  const payment = await pendingCheckoutFixture();
+  await markCheckoutPaid(db, { ...payment, eventId: `${id}_checkout_one` });
+  await markPaymentIntentRefunded(db, { paymentIntentId: payment.paymentIntentId, eventId: `${id}_full`, amount: 100, amountRefunded: 100, currency: "usd", fullyRefunded: true, livemode: false });
+  const beforeOrder = (await order().get()).data(), beforeJob = (await submissionJob().get()).data();
+  expect(beforeOrder).toMatchObject({ status: "refunded", billingStatus: "refunded" });
+  expect(beforeJob?.status).toBe("complete");
+  await markCheckoutPaid(db, { ...payment, eventId: `${id}_checkout_late` });
+  expect((await order().get()).data()).toEqual(beforeOrder);
+  expect((await submissionJob().get()).data()).toEqual(beforeJob);
+  expect((await project().collection("jobs").get()).docs.filter(item => item.data().type === "customer_email")).toHaveLength(1);
 });

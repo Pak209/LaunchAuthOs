@@ -1,3 +1,4 @@
+import { isSafeWorkspaceId } from "./identity";
 import { createHash } from "node:crypto";
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { z } from "zod";
@@ -7,7 +8,7 @@ import type { DistributionProviderResolver } from "./fulfillment";
 import { providerReleaseBindingPath } from "./provider";
 
 export const reconciliationSchema = z.object({
-  workspaceId: z.string().regex(/^[A-Za-z0-9_-]{1,160}$/),
+  workspaceId: z.string().refine(isSafeWorkspaceId, "Invalid workspace identifier."),
   projectId: z.string().regex(/^[a-f0-9]{24}$/),
   requestId: z.string().uuid(),
   expectedAttempt: z.number().int().nonnegative(),
